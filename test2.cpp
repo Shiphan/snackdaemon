@@ -5,18 +5,22 @@
 class Timer{
 	private:
 		bool canceled;
-		void start(int seconds, void (*callback)(void)) {
+		void (*callback)(void);
+
+		void start(int seconds) {
 			sleep(seconds);
 			if (!this->canceled){
-				(*callback)();
+				(*this->callback)();
 			}
 			delete this;
 		}
 	public:
 		Timer(int seconds, void (*callback)(void)) {
 			this->canceled = false;
-			std::thread timerThread(&Timer::start, seconds, callback);
-			//std::thread timerThread(this->start, seconds, callback);
+			this->callback = callback;
+			std::thread timerThread([this, seconds]()-> void {
+				this->start(seconds);
+			});
 			timerThread.detach();
 		}
 		~Timer() {
@@ -24,6 +28,10 @@ class Timer{
 		}
 		void cancel() {
 			this->canceled = true;
+		}
+		void force() {
+			this->cancel();
+			(*this->callback)();
 		}
 };
 
@@ -34,12 +42,20 @@ void timer(int seconds) {
 
 int main(int srgc, char* srgv[]) {
 
-	std::thread ti(timer, 3);
-	ti.join();
+	void (*call)(void) = [](){
+		system("notify-send test");
+		std::cout << "!!!!OMG!!!!" << std::endl;
+	};
+	Timer* timer1 = new Timer(3, call);
+	Timer* timer2 = new Timer(6, call);
+	Timer* timer3 = new Timer(6, call);
 
-	int c = 0;
+	int c = 1;
 	while (true) {
 		sleep(1);
+		if (c == 4) {
+			timer2->force();
+		}
 		std::cout << c << std::endl;
 		c++;
 	}

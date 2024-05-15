@@ -13,6 +13,38 @@ void printErrorArgs() {
 }
 void closeSnackbar();
 
+class Timer{
+	private:
+		bool canceled;
+		void (*callback)(void);
+
+		void start(int seconds) {
+			sleep(seconds);
+			if (!this->canceled){
+				(*this->callback)();
+			}
+			delete this;
+		}
+	public:
+		Timer(int seconds, void (*callback)(void)) {
+			this->canceled = false;
+			this->callback = callback;
+			std::thread timerThread([this, seconds]()-> void {
+				this->start(seconds);
+			});
+			timerThread.detach();
+		}
+		~Timer() {
+		}
+		void cancel() {
+			this->canceled = true;
+		}
+		void force() {
+			this->cancel();
+			(*this->callback)();
+		}
+};
+
 class Daemon{
 	private:
 		std::string openCommand;
@@ -21,14 +53,14 @@ class Daemon{
 		std::vector<std::string> options;
 
 		bool isOpen;
-		void open() {
-			system(this->openCommand.c_str());
-			this->isOpen = true;
-		}
+		Timer* timer;
+
 	public:
 		Daemon() {
-			// init with the json config file
 			this->isOpen = false;
+			this->timer = nullptr;
+
+			// init with the json config file
 			this->openCommand = "";
 			this->closeCommand = "";
 			this->updateCommand = "";
@@ -36,37 +68,24 @@ class Daemon{
 		}
 		void update(std::string newState) {
 			if (!this->isOpen){
-				this->open();
+				this->isOpen = true;
+				system(this->openCommand.c_str());
+			} else {
+				this->timer->cancel();
 			}
-			system(std::format(this->updateCommand, newState).c_str()); 
+			// newState string to index
+			int index;
+			system(std::format(this->updateCommand, index).c_str()); 
+			this->timer = new Timer(2, [this]()->void {
+				system(this->closeCommand.c_str());
+			});
 		}
 		void close() {
-			system(this->closeCommand.c_str());
-			this->isOpen = false;
-		}
-};
-
-class Timer{
-	private:
-		bool canceled;
-		void start(int seconds, void (*callback)(void)) {
-			sleep(seconds);
-			if (!this->canceled){
-				(*callback)();
+			if (this->isOpen) {
+				this->timer->force();
+				this->isOpen = false;
+				this->timer = nullptr;
 			}
-			delete this;
-		}
-	public:
-		Timer(int seconds, void (*callback)(void)) {
-			this->canceled = false;
-			std::thread timerThread(this->start, seconds, callback);
-			timerThread.detach();
-		}
-		~Timer() {
-			std::cout << "delete called!!!" << std::endl;
-		}
-		void cancel() {
-			this->canceled = true;
 		}
 };
 
