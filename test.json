@@ -1,0 +1,12 @@
+{
+	"commands": {
+		"open": "eww open snackbar",
+		"close": "eww close snackbar",
+		"update": "eww update snackbarIndex={}"
+	},
+	"stack": [
+		"volume",
+		"screenbrightness",
+		"powerprofiles"
+	]
+}
