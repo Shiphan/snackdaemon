@@ -17,8 +17,8 @@ int main(int argc, char* argv[]) {
 		}
 	} else if (pid == 0) {
 		sleep(2);
-		cout << "out from child" << endl;
-		system("notify-send \"out from child\"");
+		cout << "out from child" << argc << endl;
+		system(format("notify-send \"out from child\" {}", argc).c_str());
 	}
 		
 }
