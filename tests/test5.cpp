@@ -7,6 +7,14 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+class Lab {
+public:
+	int i;
+	Lab(int i) {
+		this->i = i;
+	}
+};
+
 int main(int argc, char* argv[]) {
 using namespace std;
 

@@ -1,10 +1,11 @@
 {
+	"timeout": "2s",
 	"commands": {
 		"open": "eww open snackbar",
-		"close": "eww close snackbar",
 		"update": "eww update snackbarIndex={}"
+		"close": "eww close snackbar",
 	},
-	"stack": [
+	"options": [
 		"volume",
 		"screenbrightness",
 		"powerprofiles"

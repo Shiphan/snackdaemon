@@ -1,0 +1,11 @@
+update
+	load config
+	if timerId == 0
+		open the snackbar
+	options to index
+	update the snackbar
+	set a timer
+
+close
+	load config
+	set a pseudo timer
