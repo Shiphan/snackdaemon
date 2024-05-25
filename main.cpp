@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <cstring>
 #include <iostream>
 #include <csignal>
 #include <fstream>
@@ -7,7 +8,7 @@
 #include <vector>
 #include <map>
 #include <string>
-#include <strstream>
+#include <sstream>
 #include <thread>
 #include <chrono>
 
@@ -15,24 +16,27 @@
 #include <fcntl.h>
 
 std::string format(std::string format, std::vector<std::string> values) {
-	std::ostrstream strstream;
+	std::stringstream strstream;
 	int valuesIndex = 0;
-	for (int i = 0; i < format.length(); i++) {
-		if (format.at(i) == '\\' && format.length() > i+1 && format.at(i+1) == '{') {
-			i++;
-			strstream << "{";
-		} else if (format.at(i) == '{' && format.length() > i+1 && format.at(i+1) == '}') {
-			if (valuesIndex < values.size()) {
-				strstream << values.at(valuesIndex);
+	size_t pos = 0;
+	size_t index = format.find('{');
+	while (index != std::string::npos && valuesIndex < values.size()) {
+		if (index + 1 < format.size() && format.at(index + 1) == '}') {
+			if (index == 0 || format.at(index - 1) != '\\') {
+				strstream << format.substr(pos, index - pos) << values.at(valuesIndex);
 				valuesIndex++;
-				i++;
 			} else {
-				strstream << "{}";
-				i++;
+				strstream << format.substr(pos, index - pos - 1) << "{}";
 			}
+			pos = index + 2;
 		} else {
-			strstream << format[i];
+			strstream << format.substr(pos, index - pos + 1);
+			pos = index + 1;
 		}
+		index = format.find('{', pos);
+	}
+	if (pos < format.size()) {
+		strstream << format.substr(pos);
 	}
 	return strstream.str();
 }
@@ -81,13 +85,7 @@ void printInvalidConfig() {
 	std::cout << "invalid config file" << std::endl;
 }
 
-void update(std::string openCommand, std::string updateCommand, std::vector<std::string> options, std::string option) {
-	int fd = shm_open("timerId", O_CREAT | O_RDWR, 0666);
-	ftruncate(fd, sizeof(int));
-	void* sharedPtr = mmap(NULL, sizeof(int), PROT_READ, MAP_SHARED, fd, 0);
-	const int timerId = *(int *)sharedPtr;
-	munmap(sharedPtr, sizeof(int));
-
+int updateSnackbar(std::string openCommand, std::string updateCommand, std::vector<std::string> options, std::string option) {
 	int optionIndex = -1;
 	for (int i = 0; i < options.size(); i++) {
 		if (option == options.at(i)) {
@@ -98,13 +96,35 @@ void update(std::string openCommand, std::string updateCommand, std::vector<std:
 
 	if (optionIndex == -1) {
 		std::cout << "no such option" << std::endl;
-		return;
+		return 1;
 	}
 
-	if (timerId == 0) {
+	int fd = shm_open("isSnackbarOpen", O_CREAT | O_RDWR, 0666);
+	ftruncate(fd, sizeof(bool));
+	void* sharedPtr = mmap(NULL, sizeof(bool), PROT_WRITE, MAP_SHARED, fd, 0);
+	if (!(*(bool *)sharedPtr)) {
+		*(bool *)sharedPtr = true;
 		system(openCommand.c_str());
 	}
+	munmap(sharedPtr, sizeof(bool));
+
 	system(format(updateCommand, {std::to_string(optionIndex)}).c_str());
+	return 0;
+}
+
+int closeSnackbar(std::string closeCommand) {
+	int fd = shm_open("isSnackbarOpen", O_CREAT | O_RDWR, 0666);
+	ftruncate(fd, sizeof(bool));
+	void* sharedPtr = mmap(NULL, sizeof(bool), PROT_WRITE, MAP_SHARED, fd, 0);
+	if (*(bool *)sharedPtr) {
+		*(bool*)sharedPtr = false;
+		system(closeCommand.c_str());
+		munmap(sharedPtr, sizeof(bool));
+		return 0;
+	} else {
+		munmap(sharedPtr, sizeof(bool));
+		return 1;
+	}
 }
 
 std::tuple<std::map<std::string, std::string>, std::map<std::string, std::vector<std::string>>> loadConfig(std::string filePath) {
@@ -180,8 +200,37 @@ bool validConfig(std::map<std::string, std::string> keyToValue, std::map<std::st
 	return true;
 }
 
+
 int main(int argc, char* argv[]) {
-	auto [keyToValue, keyToValuelist] = loadConfig("/home/shiphan/.config/snackdaemon/snackdaemon.conf");
+	enum {invalid, update, close, help} args;
+	if (argc == 3 && std::string(argv[1]) == std::string("update")) {
+		args = update;
+	} else if (argc == 2 && std::string(argv[1]) == std::string("close")) {
+		args = close;
+	} else if (argc == 2 && std::string(argv[1]) == std::string("help")) {
+		args = help;
+	} else {
+		args = invalid;
+	}
+
+	if (args == help) {
+		printHelp();
+		return 0;
+	}
+	if (args == invalid) {
+		printInvalidArgs();
+		return 0;
+	}
+	
+	std::string homedir;
+	try {
+		homedir = getenv("HOME");
+	} catch (std::logic_error) {
+		std::cout << "can not get your home directory." << std::endl;
+		return 0;
+	}
+
+	auto [keyToValue, keyToValuelist] = loadConfig(homedir + "/.config/snackdaemon/snackdaemon.conf");
 
 	if (!validConfig(keyToValue, keyToValuelist)) {
 		printInvalidConfig();
@@ -195,14 +244,11 @@ int main(int argc, char* argv[]) {
 	std::vector<std::string> options = keyToValuelist.at("options");
 
 	if (argc == 3 && std::string(argv[1]) == std::string("update")) {
-		update(openCommand, updateCommand, options, argv[2]);
-		timer(timeout, [closeCommand](){system(closeCommand.c_str());});
+		if (updateSnackbar(openCommand, updateCommand, options, argv[2]) == 0) {
+			timer(timeout, [closeCommand](){closeSnackbar(closeCommand);});
+		}
 	} else if (argc == 2 && std::string(argv[1]) == std::string("close")) {
-		timer(timeout, [closeCommand](){system(closeCommand.c_str());}, true);
-	} else if (argc == 2 && std::string(argv[1]) == std::string("help")) {
-		printHelp();
-	} else {
-		printInvalidArgs();
+		timer(timeout, [closeCommand](){closeSnackbar(closeCommand);}, true);
 	}
 	return 0;
 }
