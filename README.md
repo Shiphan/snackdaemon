@@ -5,9 +5,8 @@
 
 ## Example
 * [My eww snackbar](https://github.com/Shiphan/Dotfiles)
-<video autoplay muted loop>
-	<source src="./examples/demo.webm" type="video/webm">
-</video>
+
+[demo.webm](https://github.com/Shiphan/snackdaemon/assets/140245703/270afdd5-f62d-458a-9bc2-1fbb979074b5)
 
 ## Features
 有幾個command可以使用
