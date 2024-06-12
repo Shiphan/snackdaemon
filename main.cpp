@@ -2,6 +2,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <vector>
 #include <map>
 #include <string>
@@ -73,10 +74,17 @@ void timer(const std::chrono::duration<_Rep, _Period> &rtime, Callable callback,
 }
 
 void printHelp() {
-	std::cout << "I am not helping you lol. (TODO)" << std::endl;
+	std::cout << "usage: snackdaemon <command> [<args>]\n"
+	<< "commands:\n"
+	<< std::left
+    << std::setw(20) << "    help" << "Print help\n"
+	<< std::setw(20) << "    update <arg>" << "Update with <arg>'s index in \"options\" in config file\n"
+	<< std::setw(20) << "    close" << "Trigger the \"closeCommand\" in config file and end timer\n"
+	<< "\n"
+	<< "Visit 'https://github.com/Shiphan/snackdaemon' for more information or bug report.\n";
 }
 void printInvalidArgs() {
-	std::cout << "invalid arguments, try \"daemon help\" to get help." << std::endl;
+	std::cout << "invalid arguments, try `snackdaemon help` to get help." << std::endl;
 }
 void printInvalidConfig() {
 	std::cout << "invalid config file" << std::endl;
