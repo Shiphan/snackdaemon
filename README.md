@@ -4,6 +4,12 @@
 [This project is aim to control a snackbar in eww, but it should work with other things that can be controlled by simple commands.]: # 
 
 ## Example
+* [My eww snackbar](https://github.com/Shiphan/Dotfiles)
+<video autoplay muted loop>
+	<source src="./examples/demo.webm" type="video/webm">
+</video>
+
+## Features
 有幾個command可以使用
 
 [There're three commands you can use.]: #
