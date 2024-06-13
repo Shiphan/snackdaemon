@@ -13,6 +13,60 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 
+template<typename type>
+class SharedMemory {
+protected:
+	std::string name;
+	bool closed;
+	type* sharedPtr;
+	
+public:
+	SharedMemory(std::string name, int oflag = O_CREAT | O_RDWR, mode_t mode = 0666, int prot = PROT_WRITE, int flags = MAP_SHARED) {
+		this->closed = false;
+		this->name = name;
+
+		int fd = shm_open(name.c_str(), oflag, mode);
+		ftruncate(fd, sizeof(type));
+		this->sharedPtr = (type *)mmap(NULL, sizeof(type), prot, flags, fd, 0);
+	}
+	~SharedMemory() {
+		this->close();
+	}
+	void close() {
+		if (this->closed) {
+			return;
+		}
+
+		munmap(this->sharedPtr, sizeof(type));
+		this->closed = true;
+	}
+	void unlink() {
+		if (this->closed) {
+			return;
+		}
+
+		this->close();
+		shm_unlink(name.c_str());
+	}
+	std::string getName() {
+		return this->name;
+	}
+	type getData() {
+		if (this->closed) {
+			throw std::runtime_error("This shared memory object has been closed, you cannot access its data.");
+		}
+
+		return *sharedPtr;
+	}
+	void setData(type data) {
+		if (this->closed) {
+			throw std::runtime_error("This shared memory object has been closed, you cannot access its data.");
+		}
+
+		*sharedPtr = data;
+	}
+};
+
 std::string format(std::string format, std::vector<std::string> values) {
 	std::stringstream strstream;
 	int valuesIndex = 0;
@@ -49,27 +103,23 @@ void timer(const std::chrono::duration<_Rep, _Period> &rtime, Callable callback,
 		return;
 	}
 
-	int fd = shm_open("timerId", O_CREAT | O_RDWR, 0666);
-	ftruncate(fd, sizeof(int));
-	void* sharedPtr = mmap(NULL, sizeof(int), PROT_WRITE, MAP_SHARED, fd, 0);
+	SharedMemory<int> shm("timerId");
 
-	(*(int *)sharedPtr)++;
-	const int id = *(int *)sharedPtr;
+	shm.setData(shm.getData() + 1);
+	const int id = shm.getData();
 
 	if (execNow) {
 		callback();
 	}
 
 	std::this_thread::sleep_for(rtime);
-	if (id == *(int *)sharedPtr){
+	if (id == shm.getData()){
 		if (!execNow) {
 			callback();
 		}
-		munmap(sharedPtr, sizeof(int));
-		shm_unlink("timerId");
-	} else {
-		munmap(sharedPtr, sizeof(int));
+		shm.unlink();
 	}
+	shm.close();
 	exit(0);
 }
 
@@ -104,30 +154,26 @@ int updateSnackbar(std::string openCommand, std::string updateCommand, std::vect
 		return 1;
 	}
 
-	int fd = shm_open("isSnackbarOpen", O_CREAT | O_RDWR, 0666);
-	ftruncate(fd, sizeof(bool));
-	void* sharedPtr = mmap(NULL, sizeof(bool), PROT_WRITE, MAP_SHARED, fd, 0);
-	if (!(*(bool *)sharedPtr)) {
-		*(bool *)sharedPtr = true;
+	SharedMemory<bool> shm("isSnackbarOpen");
+	if (!shm.getData()) {
+		shm.setData(true);
 		system(openCommand.c_str());
 	}
-	munmap(sharedPtr, sizeof(bool));
+	shm.close();
 
 	system(format(updateCommand, {std::to_string(optionIndex)}).c_str());
 	return 0;
 }
 
 int closeSnackbar(std::string closeCommand) {
-	int fd = shm_open("isSnackbarOpen", O_CREAT | O_RDWR, 0666);
-	ftruncate(fd, sizeof(bool));
-	void* sharedPtr = mmap(NULL, sizeof(bool), PROT_WRITE, MAP_SHARED, fd, 0);
-	if (*(bool *)sharedPtr) {
-		*(bool*)sharedPtr = false;
+	SharedMemory<bool> shm("isSnackbarOpen");
+	if (shm.getData()) {
+		shm.setData(false);
 		system(closeCommand.c_str());
-		munmap(sharedPtr, sizeof(bool));
+		shm.close();
 		return 0;
 	} else {
-		munmap(sharedPtr, sizeof(bool));
+		shm.close();
 		return 1;
 	}
 }
