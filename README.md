@@ -8,6 +8,14 @@
 
 [demo.webm](https://github.com/Shiphan/snackdaemon/assets/140245703/270afdd5-f62d-458a-9bc2-1fbb979074b5)
 
+## Install
+### Linux
+```bash
+git pull https://github.com/Shiphan/snackdaemon.git
+cd snackdaemon
+./setup.sh
+```
+
 ## Features
 有幾個command可以使用
 
