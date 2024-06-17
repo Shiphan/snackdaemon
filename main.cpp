@@ -42,7 +42,7 @@ public:
 	}
 	void unlink() {
 		if (this->closed) {
-			return;
+			throw std::runtime_error("This shared memory object has been closed, you cannot access its data.");
 		}
 
 		this->close();
