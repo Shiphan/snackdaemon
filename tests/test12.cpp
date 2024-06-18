@@ -7,38 +7,43 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#define PORT 8194
+
 void openDaemon() {
 	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+
 	int int1 = 1;
 	setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &int1, sizeof(int1));
-	setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &int1, sizeof(int1));
+
 	sockaddr_in addr;
 	addr.sin_family = AF_UNIX;
 	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = htons(8091);
+	addr.sin_port = htons(PORT);
 	if (bind(sockfd, (sockaddr *)&addr, sizeof(addr)) == -1) {
-		std::cout << "bind error, errno: " << errno << std::endl;
+		perror("bind error");
 		return;
 	}
+
 	listen(sockfd, 3);
+
 	int clisock = accept(sockfd, nullptr, nullptr);
 	
-	std::string message("                       ");
-	recv(sockfd, message.data(), sizeof(message.data()), 0);
-	std::cout << "message: " << message << std::endl;
+	char buffer[1024] = {};
+	recv(clisock, buffer, sizeof(buffer), 0);
+	std::cout << "message: " << buffer << std::endl;
 
 	close(sockfd);
+	close(clisock);
 }
 
 void sendMessage(std::string message) {
 	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
-	int int1 = 1;
-	setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &int1, sizeof(int1));
-	setsockopt(sockfd, SOL_SOCKET, SO_REUSEPORT, &int1, sizeof(int1));
+
 	sockaddr_in addr;
 	addr.sin_family = AF_UNIX;
 	addr.sin_addr.s_addr = INADDR_ANY;
-	addr.sin_port = htons(8091);
+	addr.sin_port = htons(PORT);
+
 	if (connect(sockfd, (sockaddr *)&addr, sizeof(addr)) == -1) {
 		std::cout << "connect error, errno" << errno << std::endl;
 		return;
