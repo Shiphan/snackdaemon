@@ -6,6 +6,46 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+int sendString(int fd, std::string str) {
+	std::string length(std::to_string(str.length() + 1));
+	send(fd, length.c_str(), length.length() + 1, 0);
+
+	/*
+	char lenBuffer[21] = {};
+	recv(fd, lenBuffer, sizeof(lenBuffer), 0);
+	unsigned long len = std::stoul(lenBuffer);
+	*/
+
+	send(fd, str.c_str(), str.length() + 1, 0);
+	std::cout << "str: " << str << ", length: " << length << std::endl;
+
+	/*
+	if (len == str.length() + 1) {
+		return 0;
+	}
+
+	return -1;
+	*/
+	return 0;
+}
+
+std::string recvString(int fd) {
+	char lenBuffer[21] = {};
+	recv(fd, lenBuffer, sizeof(lenBuffer), 0);
+
+	// send(fd, lenBuffer, sizeof(lenBuffer), 0);
+
+	char* buffer = new char[std::stoul(lenBuffer)];
+	recv(fd, buffer, sizeof(buffer), 0);
+
+	std::cout << "str: " << buffer << ", length: " << lenBuffer << std::endl;
+
+	std::string rvalue(buffer);
+	delete[] buffer;
+
+	return rvalue;
+}
+
 void openDaemon() {
 	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
 
@@ -30,8 +70,7 @@ void openDaemon() {
 			perror("recv error");
 		}
 		if (strcmp(buffer, "ping") == 0) {
-			std::string mess("pong");
-			send(clisockfd, mess.c_str(), mess.length(), 0);
+			sendString(clisockfd, "pong");
 			std::cout << "pinged!!" << std::endl;
 
 		} else {
@@ -42,6 +81,7 @@ void openDaemon() {
 	close(sockfd);
 	unlink("/tmp/snackdaemon");
 }
+
 
 void sendMessage(std::string message) {
 	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
@@ -71,9 +111,8 @@ void pingDaemon() {
 	std::string message("ping");
 	send(sockfd, message.c_str(), message.length(), 0);
 
-	char buffer[1024] = {};
-	recv(sockfd, buffer, sizeof(buffer), 0);
-	std::cout << buffer << std::endl;
+	std::string rec = recvString(sockfd);
+	std::cout << rec << std::endl;
 	close(sockfd);
 
 
