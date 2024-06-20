@@ -22,7 +22,10 @@ cd snackdaemon
 [There're three commands you can use.]: #
 
 ```bash
-snackdaemon update option
+snackdaemon daemon
+snackdaemon kill
+snackdaemon ping
+snackdaemon update <option>
 snackdaemon close
 snackdaemon help
 ```
@@ -53,9 +56,3 @@ options = [
 	powerprofiles
 ]
 ```
-
-## daemon...?
-我知道，這其實不是一個"daemon"，根本就沒有一個行程在背景運行，而是用shared memory實現這些功能的，這主要是我的skill issue(我想這應該是需要Inter-process communication)。  
-總之，在接下來的版本中，我們會先用daemon實現與現在相同的功能，有可能會使用的別的語言，之後再試著增加一些新的功能。
-
-[It's just skill issue.]: #
