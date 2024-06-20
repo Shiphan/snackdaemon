@@ -1,69 +1,47 @@
 #include <csignal>
 
-#include <fstream>
+#include <cstddef>
 #include <iostream>
+#include <fstream>
 #include <iomanip>
 #include <vector>
 #include <map>
+#include <cstring>
 #include <string>
 #include <sstream>
 #include <thread>
 #include <chrono>
 
-#include <sys/mman.h>
-#include <fcntl.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
-template<typename type>
-class SharedMemory {
-protected:
-	std::string name;
-	bool closed;
-	type* sharedPtr;
-	
+#define SERVER_PATH "/tmp/snackdaemon"
+
+class Timer{
+private:
+	bool canceled;
+	Timer** timer;
+
 public:
-	SharedMemory(std::string name, int oflag = O_CREAT | O_RDWR, mode_t mode = 0666, int prot = PROT_WRITE, int flags = MAP_SHARED) {
-		this->closed = false;
-		this->name = name;
-
-		int fd = shm_open(name.c_str(), oflag, mode);
-		ftruncate(fd, sizeof(type));
-		this->sharedPtr = (type *)mmap(NULL, sizeof(type), prot, flags, fd, 0);
+	template<typename _Rep, typename _Period, typename Callable>
+	Timer(const std::chrono::duration<_Rep, _Period> &rtime, Callable callback, Timer** timer) {
+		this->canceled = false;
+		this->timer = timer;
+		std::thread timerThread([this, rtime, callback]()-> void {
+			std::this_thread::sleep_for(rtime);
+			if (!this->canceled){
+				callback();
+				*(this->timer) = nullptr;
+			}
+			delete this;
+		});
+		timerThread.detach();
 	}
-	~SharedMemory() {
-		this->close();
+	~Timer() {
 	}
-	void close() {
-		if (this->closed) {
-			return;
-		}
-
-		munmap(this->sharedPtr, sizeof(type));
-		this->closed = true;
-	}
-	void unlink() {
-		if (this->closed) {
-			throw std::runtime_error("This shared memory object has been closed, you cannot access its data.");
-		}
-
-		this->close();
-		shm_unlink(name.c_str());
-	}
-	std::string getName() {
-		return this->name;
-	}
-	type getData() {
-		if (this->closed) {
-			throw std::runtime_error("This shared memory object has been closed, you cannot access its data.");
-		}
-
-		return *sharedPtr;
-	}
-	void setData(type data) {
-		if (this->closed) {
-			throw std::runtime_error("This shared memory object has been closed, you cannot access its data.");
-		}
-
-		*sharedPtr = data;
+	void cancel() {
+		this->canceled = true;
 	}
 };
 
@@ -93,41 +71,14 @@ std::string format(std::string format, std::vector<std::string> values) {
 	return strstream.str();
 }
 
-template<typename _Rep, typename _Period, typename Callable>
-void timer(const std::chrono::duration<_Rep, _Period> &rtime, Callable callback, bool execNow = false) {
-	pid_t pid = fork();
-	if (pid == -1) {
-		std::cout << "fork error" << std::endl;
-		return;
-	} else if (pid > 0) {
-		return;
-	}
-
-	SharedMemory<int> shm("timerId");
-
-	shm.setData(shm.getData() + 1);
-	const int id = shm.getData();
-
-	if (execNow) {
-		callback();
-	}
-
-	std::this_thread::sleep_for(rtime);
-	if (id == shm.getData()){
-		if (!execNow) {
-			callback();
-		}
-		shm.unlink();
-	}
-	shm.close();
-	exit(0);
-}
-
 void printHelp() {
 	std::cout << "usage: snackdaemon <command> [<args>]\n"
 	<< "commands:\n"
 	<< std::left
-    << std::setw(20) << "    help" << "Print help\n"
+	<< std::setw(20) << "    help" << "Print help\n"
+	<< std::setw(20) << "    daemon" << "Start the daemon\n"
+	<< std::setw(20) << "    kill" << "Send \"kill\" to the daemon\n"
+	<< std::setw(20) << "    ping" << "Ping the daemon to check connectivity\n"
 	<< std::setw(20) << "    update <arg>" << "Update with <arg>'s index in \"options\" in config file\n"
 	<< std::setw(20) << "    close" << "Trigger the \"closeCommand\" in config file and end timer\n"
 	<< "\n"
@@ -140,43 +91,46 @@ void printInvalidConfig() {
 	std::cout << "invalid config file" << std::endl;
 }
 
-int updateSnackbar(std::string openCommand, std::string updateCommand, std::vector<std::string> options, std::string option) {
-	int optionIndex = -1;
-	for (int i = 0; i < options.size(); i++) {
-		if (option == options.at(i)) {
-			optionIndex = i;
-			break;
-		}
-	}
+enum message {
+	ping,
+	update,
+	closeNow,
+	killDaemon
+};
 
-	if (optionIndex == -1) {
-		std::cout << "no such option" << std::endl;
-		return 1;
-	}
+int sendString(int fd, std::string str) {
+	std::string length = std::to_string(str.length() + 1);
+	send(fd, length.c_str(), length.length() + 1, 0);
 
-	SharedMemory<bool> shm("isSnackbarOpen");
-	if (!shm.getData()) {
-		shm.setData(true);
-		system(openCommand.c_str());
-	}
-	shm.close();
+	char lenBuffer[21] = {};
+	recv(fd, lenBuffer, sizeof(lenBuffer), 0);
+	unsigned long len = std::stoul(lenBuffer);
 
-	system(format(updateCommand, {std::to_string(optionIndex)}).c_str());
-	return 0;
-}
+	send(fd, str.c_str(), str.length() + 1, 0);
 
-int closeSnackbar(std::string closeCommand) {
-	SharedMemory<bool> shm("isSnackbarOpen");
-	if (shm.getData()) {
-		shm.setData(false);
-		system(closeCommand.c_str());
-		shm.close();
+	if (len == str.length() + 1) {
 		return 0;
-	} else {
-		shm.close();
-		return 1;
 	}
+
+	return -1;
 }
+
+std::string recvString(int fd) {
+	char lenBuffer[21] = {};
+	recv(fd, lenBuffer, sizeof(lenBuffer), 0);
+
+	send(fd, lenBuffer, sizeof(lenBuffer), 0);
+
+	size_t length = std::stoul(lenBuffer);
+	char* buffer = new char[length];
+	recv(fd, buffer, length, 0);
+
+	std::string rvalue(buffer);
+	delete[] buffer;
+
+	return rvalue;
+}
+
 
 std::tuple<std::map<std::string, std::string>, std::map<std::string, std::vector<std::string>>> loadConfig(std::string filePath) {
 	std::map<std::string, std::string> keyToValue;
@@ -251,41 +205,41 @@ bool validConfig(std::map<std::string, std::string> keyToValue, std::map<std::st
 	return true;
 }
 
+void tryKillOldDaemon() {
+	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
 
-int main(int argc, char* argv[]) {
-	enum {invalid, update, close, help} args;
-	if (argc == 3 && std::string(argv[1]) == std::string("update")) {
-		args = update;
-	} else if (argc == 2 && std::string(argv[1]) == std::string("close")) {
-		args = close;
-	} else if (argc == 2 && std::string(argv[1]) == std::string("help")) {
-		args = help;
-	} else {
-		args = invalid;
+	sockaddr_un addr;
+	strcpy(addr.sun_path, SERVER_PATH);
+	addr.sun_family = AF_UNIX;
+	if (connect(sockfd, (sockaddr *)&addr, sizeof(addr)) == -1) {
+		close(sockfd);
+		return;
 	}
 
-	if (args == help) {
-		printHelp();
-		return 0;
-	}
-	if (args == invalid) {
-		printInvalidArgs();
-		return 0;
-	}
+	std::cout << "sent kill to the old daemon and the respond is: ";
 	
-	std::string homedir;
-	try {
-		homedir = getenv("HOME");
-	} catch (std::logic_error) {
+	std::string mess = std::to_string(killDaemon);
+	send(sockfd, mess.c_str(), mess.length() + 1, 0);
+	
+	std::string respond = recvString(sockfd);
+	std::cout << respond;
+
+	close(sockfd);
+	return;
+}
+
+void openDaemon() {
+	if (getenv("HOME") == NULL) {
 		std::cout << "can not get your home directory." << std::endl;
-		return 0;
+		return;
 	}
+	std::string homedir = getenv("HOME");
 
 	auto [keyToValue, keyToValuelist] = loadConfig(homedir + "/.config/snackdaemon/snackdaemon.conf");
 
 	if (!validConfig(keyToValue, keyToValuelist)) {
 		printInvalidConfig();
-		return 0;
+		return;
 	}
 	
 	std::chrono::duration timeout = std::chrono::milliseconds(std::stoi(keyToValue.at("timeout")));
@@ -294,12 +248,176 @@ int main(int argc, char* argv[]) {
 	std::string closeCommand = keyToValue.at("closeCommand");
 	std::vector<std::string> options = keyToValuelist.at("options");
 
-	if (argc == 3 && std::string(argv[1]) == std::string("update")) {
-		if (updateSnackbar(openCommand, updateCommand, options, argv[2]) == 0) {
-			timer(timeout, [closeCommand](){closeSnackbar(closeCommand);});
-		}
-	} else if (argc == 2 && std::string(argv[1]) == std::string("close")) {
-		timer(timeout, [closeCommand](){closeSnackbar(closeCommand);}, true);
+	tryKillOldDaemon();
+
+	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+	unlink(SERVER_PATH);
+
+	sockaddr_un addr;
+	strcpy(addr.sun_path, SERVER_PATH);
+	addr.sun_family = AF_UNIX;
+	if (bind(sockfd, (sockaddr *)&addr, sizeof(addr)) == -1) {
+		perror("bind error");
 	}
+
+	if (listen(sockfd, 10) == -1) {
+		perror("listen error");
+	}
+
+	Timer* timer;
+	bool running = true;
+	while (running) {
+		int clisockfd = accept(sockfd, nullptr, nullptr);
+		
+		char messageBuffer[11] = {};
+		if (recv(clisockfd, messageBuffer, sizeof(messageBuffer), 0) == -1) {
+			perror("recv error");
+		}
+		
+		switch ((message)std::stoi(messageBuffer)) {
+			case ping: {
+				std::cout << "ping" << std::endl;
+
+				sendString(clisockfd, "pong\n");
+				break;
+			}
+			case killDaemon: {
+				std::cout << "kill" << std::endl;
+
+				sendString(clisockfd, "ok\n");
+				running = false;
+				break;
+			}
+			case closeNow: {
+				std::cout << "close" << std::endl;
+
+				sendString(clisockfd, "");
+				if (timer != nullptr) {
+					timer->cancel();
+					system(closeCommand.c_str());
+					timer = nullptr;
+				}
+				break;
+			}
+			case update: {
+				std::cout << "update: ";
+
+				std::string mess = std::to_string(update);
+				send(clisockfd, mess.c_str(), mess.length() + 1, 0);
+
+				std::string option = recvString(clisockfd);
+
+				std::cout << option;
+
+				int optionIndex = -1;
+				for (int i = 0; i < options.size(); i++) {
+					if (option == options.at(i)) {
+						optionIndex = i;
+						break;
+					}
+				}
+
+				if (optionIndex == -1) {
+					sendString(clisockfd, "no such option\n");
+					std::cout << " (no such option)" << std::endl;
+				} else {
+					sendString(clisockfd, "");
+					std::cout << " (index: " << optionIndex << ")" << std::endl;
+
+					if (timer == nullptr) {
+						system(openCommand.c_str());
+					} else {
+						timer->cancel();
+					}
+					system(format(updateCommand, {std::to_string(optionIndex)}).c_str());
+					timer = new Timer(timeout, [closeCommand](){system(closeCommand.c_str());}, &timer);
+				}
+				break;
+			}
+			default: {
+				std::cout << "unknown message" << std::endl;
+			}
+		}
+	
+		close(clisockfd);
+	}
+
+	close(sockfd);
+	unlink(SERVER_PATH);
+
+	std::this_thread::sleep_for(timeout);
+}
+
+void sendMessage(message message) {
+	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+	sockaddr_un addr;
+	strcpy(addr.sun_path, SERVER_PATH);
+	addr.sun_family = AF_UNIX;
+	if (connect(sockfd, (sockaddr *)&addr, sizeof(addr)) == -1) {
+		std::cout << "Unable to connect to daemon.\n";
+		close(sockfd);
+		return;
+	}
+	
+	std::string mess = std::to_string(message);
+	send(sockfd, mess.c_str(), mess.length() + 1, 0);
+	
+	std::string respond = recvString(sockfd);
+	std::cout << respond;
+
+	close(sockfd);
+}
+
+void updateSnackbar(std::string option) {
+	int sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+
+	sockaddr_un addr;
+	strcpy(addr.sun_path, SERVER_PATH);
+	addr.sun_family = AF_UNIX;
+	if (connect(sockfd, (sockaddr *)&addr, sizeof(addr)) == -1) {
+		std::cout << "Unable to connect to daemon.\n";
+		close(sockfd);
+		return;
+	}
+	
+	std::string mess = std::to_string(update);
+	send(sockfd, mess.c_str(), mess.length() + 1, 0);
+
+	char messBuffer[11] = {};
+	recv(sockfd, messBuffer, sizeof(messBuffer), 0);
+
+	sendString(sockfd, option);
+
+	std::string respond = recvString(sockfd);
+	std::cout << respond;
+
+	close(sockfd);
+}
+
+int main(int argc, char* argv[]) {
+	if (argc == 1) {
+		printHelp();
+	} else if (argc == 2) {
+		if (strcmp(argv[1], "daemon") == 0) {
+			openDaemon();
+		} else if (strcmp(argv[1], "kill") == 0) {
+			sendMessage(killDaemon);
+		} else if (strcmp(argv[1], "ping") == 0) {
+			sendMessage(ping);
+		} else if (strcmp(argv[1], "close") == 0) {
+			sendMessage(closeNow);
+		} else if (strcmp(argv[1], "help") == 0) {
+			printHelp();
+		} else {
+			printInvalidArgs();
+		}
+	} else if (argc == 3 && strcmp(argv[1], "update") == 0) {
+		updateSnackbar(std::string(argv[2]));
+	} else {
+		printInvalidArgs();
+	}
+
 	return 0;
 }
