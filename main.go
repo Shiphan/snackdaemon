@@ -22,7 +22,7 @@ type Timer struct {
 	stopped   bool
 }
 
-func (timer Timer) start() {
+func (timer *Timer) start() {
 	timer.started = true
 	time.NewTimer(timer.sleepTime)
 	go func() {
@@ -34,7 +34,7 @@ func (timer Timer) start() {
 	}()
 }
 
-func (timer Timer) cancel() {
+func (timer *Timer) cancel() {
 	timer.stopped = true
 }
 
@@ -225,7 +225,7 @@ func openDaemon() {
 
 	recv, err := client(TlvData{KILL, ""})
 	if err == nil {
-		fmt.Printf("sent kill to the old daemon and the respond is: %v", recv.Value)
+		fmt.Printf("sent kill to the old daemon and the response is: %v\n", recv.Value)
 	}
 
 	os.Remove(SOCKET_PATH)
