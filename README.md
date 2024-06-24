@@ -10,10 +10,11 @@
 
 ## Install
 ### Linux
+(this is not working)
 ```bash
 git pull https://github.com/Shiphan/snackdaemon.git
 cd snackdaemon
-./setup.sh
+go install
 ```
 
 ## Features
@@ -23,6 +24,7 @@ cd snackdaemon
 
 ```bash
 snackdaemon daemon
+snackdaemon reload
 snackdaemon kill
 snackdaemon ping
 snackdaemon update <option>
@@ -43,16 +45,18 @@ When the time set by `timeout` (in ms) has passed after the last update, or afte
 
 ---
 
-可以參考以下的conf檔
-```snackdaemon.conf
-timeout = 2000
-openCommand = eww open snackbar > /dev/null
-updateCommand = eww update snackbarIndex={} > /dev/null
-closeCommand = eww close snackbar > /dev/null
-options = [
-	volume
-	player
-	screenbrightness
-	powerprofiles
-]
+可以參考以下的config(json)檔
+```json
+{
+	"timeout": "2s",
+	"openCommand": "eww open snackbar",
+	"updateCommand": "eww update snackbarIndex=%d",
+	"closeCommand": "eww close snackbar",
+	"options": [
+		"volume",
+		"player",
+		"screenbrightness",
+		"powerprofiles"
+	]
+}
 ```
