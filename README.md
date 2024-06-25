@@ -1,5 +1,6 @@
 # snackdaemon
-這個程式是以管理用eww寫的snackbar為目的設計的
+這個程式是以管理用eww寫的snackbar為目的設計的  
+(有一個[go分支](https://github.com/Shiphan/snackdaemon/tree/go)以go實現類似的功能，並應該很快就有nix支援)
 
 [This project is aim to control a snackbar in eww, but it should work with other things that can be controlled by simple commands.]: # 
 
