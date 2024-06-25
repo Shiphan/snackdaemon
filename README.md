@@ -16,7 +16,6 @@
 
 ## Install
 ### Linux
-(this is not working)
 ```bash
 git pull https://github.com/Shiphan/snackdaemon.git
 cd snackdaemon
