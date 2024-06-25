@@ -3,6 +3,12 @@
 
 [This project is aim to control a snackbar in eww, but it should work with other things that can be controlled by simple commands.]: # 
 
+## go branch
+這個分支以go實現類似的功能，有一些額外的改進:
+* json: 改用json作為config檔的格式
+* reload: 在運行中重新載入cofig檔
+* ping: 現在ping可以計算延遲的時間
+
 ## Example
 * [My eww snackbar](https://github.com/Shiphan/Dotfiles)
 
