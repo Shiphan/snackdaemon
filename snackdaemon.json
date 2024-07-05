@@ -1,0 +1,12 @@
+{
+	"timeout": "2s",
+	"openCommand": "eww open snackbar",
+	"updateCommand": "eww update snackbarIndex=%d",
+	"closeCommand": "eww close snackbar",
+	"options": [
+		"volume",
+		"player",
+		"screenbrightness",
+		"powerprofiles"
+	]
+}

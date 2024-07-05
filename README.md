@@ -4,6 +4,12 @@
 
 [This project is aim to control a snackbar in eww, but it should work with other things that can be controlled by simple commands.]: # 
 
+## go branch
+這個分支以go實現類似的功能，有一些額外的改進:
+* json: 改用json作為config檔的格式
+* reload: 在運行中重新載入cofig檔
+* ping: 現在ping可以計算延遲的時間
+
 ## Example
 * [My eww snackbar](https://github.com/Shiphan/Dotfiles)
 
@@ -14,7 +20,7 @@
 ```bash
 git pull https://github.com/Shiphan/snackdaemon.git
 cd snackdaemon
-./setup.sh
+go install
 ```
 
 ## Features
@@ -24,6 +30,7 @@ cd snackdaemon
 
 ```bash
 snackdaemon daemon
+snackdaemon reload
 snackdaemon kill
 snackdaemon ping
 snackdaemon update <option>
@@ -44,16 +51,18 @@ When the time set by `timeout` (in ms) has passed after the last update, or afte
 
 ---
 
-可以參考以下的conf檔
-```snackdaemon.conf
-timeout = 2000
-openCommand = eww open snackbar > /dev/null
-updateCommand = eww update snackbarIndex={} > /dev/null
-closeCommand = eww close snackbar > /dev/null
-options = [
-	volume
-	player
-	screenbrightness
-	powerprofiles
-]
+可以參考以下的config(json)檔
+```json
+{
+	"timeout": "2s",
+	"openCommand": "eww open snackbar",
+	"updateCommand": "eww update snackbarIndex=%d",
+	"closeCommand": "eww close snackbar",
+	"options": [
+		"volume",
+		"player",
+		"screenbrightness",
+		"powerprofiles"
+	]
+}
 ```
