@@ -25,28 +25,28 @@ go install
 ```nix
 environment.systemPackages = with pkgs; [
   (buildGoModule rec {
-		pname = "snackdaemon";
-		version = "unstable-2024-06-26";
+    pname = "snackdaemon";
+    version = "unstable-2024-06-26";
 
-		src = fetchFromGitHub {
-			owner = "Shiphan";
-			repo = "snackdaemon";
-			rev = "1b7679f5ee5b8ffd923273a84891845dd20b1c81";
-			hash = "sha256-IRGErIPlr5CEoR96S+k/ARaogewlOfc+PNklRe8s+lc=";
-		};
+    src = fetchFromGitHub {
+      owner = "Shiphan";
+      repo = "snackdaemon";
+      rev = "1b7679f5ee5b8ffd923273a84891845dd20b1c81";
+      hash = "sha256-IRGErIPlr5CEoR96S+k/ARaogewlOfc+PNklRe8s+lc=";
+    };
 
-		vendorHash = null;
+    vendorHash = null;
 
-		ldflags = [ "-s" "-w" ];
+    ldflags = [ "-s" "-w" ];
 
-		meta = with lib; {
-			description = "Daemon for snackbar";
-			homepage = "https://github.com/Shiphan/snackdaemon/";
-			license = licenses.mit;
-			maintainers = with maintainers; [ ];
-			mainProgram = "snackdaemon";
-		};
-	})
+    meta = with lib; {
+      description = "Daemon for snackbar";
+      homepage = "https://github.com/Shiphan/snackdaemon/";
+      license = licenses.mit;
+      maintainers = with maintainers; [ ];
+      mainProgram = "snackdaemon";
+    };
+  })
 ];
 ```
 
