@@ -71,18 +71,18 @@ func decodeToTlvData(bytes []byte) (TlvData, error) {
 	var tlv TlvData
 
 	if len(bytes) < 11 || bytes[len(bytes)-1] != byte(0) {
-		return tlv, errors.New("This is a invalid TLV data")
+		return tlv, errors.New("this is a invalid tlv data")
 	}
 
 	length := binary.BigEndian.Uint64(bytes[2:])
 	if length+11 != uint64(len(bytes)) {
-		return tlv, errors.New("This is a invalid TLV data")
+		return tlv, errors.New("this is a invalid tlv data")
 	}
 
 	value := string(bytes[10 : len(bytes)-1])
 
-	if strings.Index(value, string(rune(0))) != -1 {
-		return tlv, errors.New("This is a invalid TLV data")
+	if strings.Contains(value, string(rune(0))) {
+		return tlv, errors.New("this is a invalid tlv data")
 	}
 
 	tlv.Type = binary.BigEndian.Uint16(bytes[0:])
