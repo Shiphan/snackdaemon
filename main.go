@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"os"
 	"os/exec"
@@ -226,15 +227,38 @@ func openDaemon(socketPath string, configPath string) {
 		configPath = homedir + "/.config/snackdaemon/snackdaemon.json"
 	}
 
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGINT)
-	go func() {
-		<-c
-		_, err := client(TlvData{KILL, ""}, socketPath)
-		if err != nil {
-			panic("Unable to connect to daemon when received SIGINT.")
+	if _, err := os.Stat(socketPath); err == nil {
+		fmt.Printf("Found \"%v\", trying close it.\n", socketPath)
+
+		for i := 0; i < 5; i++ {
+			recv, err := client(TlvData{KILL, ""}, socketPath)
+			if err != nil {
+				fmt.Printf("try[%d]: error: %v\n", i, err)
+				time.Sleep(500 * time.Millisecond)
+				if _, err := os.Stat(socketPath); errors.Is(err, fs.ErrNotExist) {
+					break
+				}
+				continue
+			}
+
+			fmt.Printf("try[%d]: received: %v\n", i, recv.Value)
+
+			if _, err := os.Stat(socketPath); errors.Is(err, fs.ErrNotExist) {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+			if _, err := os.Stat(socketPath); errors.Is(err, fs.ErrNotExist) {
+				break
+			}
 		}
-	}()
+
+		if _, err := os.Stat(socketPath); err == nil {
+			fmt.Printf("Unable to close the old daemon (socket at \"%v\")\n", socketPath)
+			return
+		}
+
+		fmt.Println("----------")
+	}
 
 	config, err := loadConfig(configPath)
 	if err != nil {
@@ -245,18 +269,26 @@ func openDaemon(socketPath string, configPath string) {
 	printConfig(config)
 	fmt.Println("----------")
 
-	recv, err := client(TlvData{KILL, ""}, socketPath)
-	if err == nil {
-		fmt.Printf("sent kill to the old daemon and the response is: %v\n", recv.Value)
-	}
-
-	os.Remove(socketPath)
 	listener, err := net.Listen("unix", socketPath)
 	if err != nil {
 		fmt.Printf("Can not listen to \"%s\"", socketPath)
 	}
 	defer os.Remove(socketPath)
 	defer listener.Close()
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT)
+	go func() {
+		<-c
+		_, err := client(TlvData{KILL, ""}, socketPath)
+		if err != nil {
+			panic("Unable to connect to daemon when received SIGINT.")
+		}
+		time.Sleep(time.Second)
+		fmt.Println("Force closing...")
+		os.Remove(socketPath)
+		os.Exit(0)
+	}()
 
 	timer := NewTimer(config.timeoutDuration, func() {}, false)
 	running := true
