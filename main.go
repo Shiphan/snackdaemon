@@ -8,8 +8,10 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -223,6 +225,16 @@ func openDaemon(socketPath string, configPath string) {
 		}
 		configPath = homedir + "/.config/snackdaemon/snackdaemon.json"
 	}
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, syscall.SIGINT)
+	go func() {
+		<-c
+		_, err := client(TlvData{KILL, ""}, socketPath)
+		if err != nil {
+			panic("Unable to connect to daemon when received SIGINT.")
+		}
+	}()
 
 	config, err := loadConfig(configPath)
 	if err != nil {
