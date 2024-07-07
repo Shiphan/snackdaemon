@@ -416,7 +416,7 @@ func main() {
 
 			flags.config = true
 			flags.configPath = os.Args[i]
-		case "daemon", "kill", "ping", "reload", "close", "help":
+		case "daemon", "kill", "ping", "reload", "close", "generate-config", "help":
 			if command != "" {
 				printInvalidArgs()
 				return
@@ -541,6 +541,22 @@ func main() {
 			break
 		}
 		fmt.Println(recv.Value)
+	case "generate-config":
+		if flags.config || flags.socket {
+			printInvalidArgs()
+			return
+		}
+		if flags.help {
+			// TODO: add generate-config help
+			fmt.Println("The help for generate-config")
+			return
+		}
+
+		b, err := json.MarshalIndent(Config{Timeout: "2s", OpenCommand: "eww open snackbar", UpdateCommand: "eww update snackbarIndex=%d", CloseCommand: "eww close snackbar", Options: []string{"volume", "player", "screenbrightness", "powerprofiles"}}, "", "\t")
+		if err != nil {
+			fmt.Println(err)
+		}
+		fmt.Println(string(b))
 	case "help":
 		if flags.help {
 			// TODO: add help help
