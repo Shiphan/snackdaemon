@@ -25,7 +25,7 @@ const DEFAULT_SOCKET_PATH string = "/tmp/snackdaemon.sock"
 var DEFAULT_LINUX_SHELL []string = []string{"bash", "-c"}
 var DEFAULT_WINDOWS_SHELL []string = []string{"powershell.exe", "-c"}
 
-func ternary[T any](isA bool, a T, b T) T {
+func cond[T any](isA bool, a T, b T) T {
 	if isA {
 		return a
 	}
@@ -332,7 +332,7 @@ func openDaemon(socketPath string, useConfig bool, configPath string) {
 
 			if timer.started && !timer.stopped {
 				timer.cancel()
-				execute(append(ternary(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
+				execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
 			}
 
 			conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
@@ -345,17 +345,17 @@ func openDaemon(socketPath string, useConfig bool, configPath string) {
 			}
 
 			if timer.stopped || !timer.started {
-				execute(append(ternary(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.OpenCommand))
+				execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.OpenCommand))
 				exec.Command("bash", "-c", config.OpenCommand).Run()
 			}
 
-			execute(append(ternary(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), fmt.Sprintf(config.UpdateCommand, index)))
+			execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), fmt.Sprintf(config.UpdateCommand, index)))
 
 			fmt.Printf("update: %s (index: %d)\n", tlv.Value, index)
 
 			timer.cancel()
 			timer = NewTimer(config.timeoutDuration, func() {
-				execute(append(ternary(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
+				execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
 			}, true)
 
 			conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
@@ -471,7 +471,7 @@ func main() {
 			return
 		}
 
-		openDaemon(ternary(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH), flags.config, flags.configPath)
+		openDaemon(cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH), flags.config, flags.configPath)
 	case "kill":
 		if flags.config {
 			printInvalidArgs()
@@ -483,7 +483,7 @@ func main() {
 			return
 		}
 
-		recv, err := client(TlvData{KILL, ""}, ternary(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{KILL, ""}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
 		if err != nil {
 			fmt.Println("Unable to connect to daemon.")
 			break
@@ -501,7 +501,7 @@ func main() {
 		}
 
 		start := time.Now()
-		recv, err := client(TlvData{PING, ""}, ternary(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{PING, ""}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
 		if err != nil {
 			fmt.Println("Unable to connect to daemon.")
 			break
@@ -515,7 +515,7 @@ func main() {
 			return
 		}
 
-		recv, err := client(TlvData{RELOAD, flags.configPath}, ternary(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{RELOAD, flags.configPath}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
 		if err != nil {
 			fmt.Println("Unable to connect to daemon.")
 			break
@@ -532,7 +532,7 @@ func main() {
 			return
 		}
 
-		recv, err := client(TlvData{CLOSE, ""}, ternary(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{CLOSE, ""}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
 		if err != nil {
 			fmt.Println("Unable to connect to daemon.")
 			break
@@ -549,7 +549,7 @@ func main() {
 			return
 		}
 
-		recv, err := client(TlvData{UPDATE, updateOption}, ternary(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{UPDATE, updateOption}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
 		if err != nil {
 			fmt.Println("Unable to connect to daemon.")
 			break
