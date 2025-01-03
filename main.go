@@ -329,31 +329,28 @@ type Args struct {
 
 // tags: --help -h --port -p --config -c
 // commands: daemon kill ping close reload update help
-func getArgs() (Args, error) {
-	tmpArgs := struct {
-		command      string
-		help         bool
-		port         *uint16
-		configPath   *string
-		updateOption string
+func loadArgs() (Args, error) {
+	args := Args{}
+	argsSetted := struct {
+		command    bool
+		port       bool
+		configPath bool
 	}{
-		command:      "",
-		help:         false,
-		port:         nil,
-		configPath:   nil,
-		updateOption: "",
+		command:    false,
+		port:       false,
+		configPath: false,
 	}
 	for i := 1; i < len(os.Args); i++ {
 		switch os.Args[i] {
 		case "--help", "-h":
-			if tmpArgs.help {
+			if args.help {
 				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			tmpArgs.help = true
+			args.help = true
 		case "--port", "-p":
 			i++
-			if tmpArgs.port != nil || i >= len(os.Args) {
+			if argsSetted.port || i >= len(os.Args) {
 				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
@@ -361,49 +358,44 @@ func getArgs() (Args, error) {
 			if err != nil {
 				return Args{}, err
 			}
-			tmpArgs.port = new(uint16)
-			*tmpArgs.port = uint16(port)
+			argsSetted.port = true
+			args.port = uint16(port)
 		case "--config", "-c":
 			i++
-			if tmpArgs.configPath != nil || i >= len(os.Args) {
+			if argsSetted.configPath || i >= len(os.Args) {
 				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			tmpArgs.configPath = &os.Args[i]
+			argsSetted.configPath = true
+			args.configPath = os.Args[i]
 		case "daemon", "kill", "ping", "reload", "close", "generate-config", "help":
-			if tmpArgs.command != "" {
+			if argsSetted.command {
 				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			tmpArgs.command = os.Args[i]
+			argsSetted.command = true
+			args.command = os.Args[i]
 		case "update":
 			i++
-			if tmpArgs.command != "" || i >= len(os.Args) {
+			if args.command != "" || i >= len(os.Args) {
 				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			tmpArgs.command = "update"
-			tmpArgs.updateOption = os.Args[i]
+			argsSetted.command = true
+			args.command = "update"
+			args.updateOption = os.Args[i]
 		default:
 			return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 		}
 	}
 
-	if tmpArgs.command == "" {
+	if !argsSetted.command {
 		return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 	}
-	args := Args{
-		command:      tmpArgs.command,
-		help:         tmpArgs.help,
-		port:         DEFAULT_PORT,
-		updateOption: tmpArgs.updateOption,
+	if !argsSetted.port {
+		args.port = DEFAULT_PORT
 	}
-	if tmpArgs.port != nil {
-		args.port = *tmpArgs.port
-	}
-	if tmpArgs.configPath != nil {
-		args.configPath = *tmpArgs.configPath
-	} else {
+	if !argsSetted.configPath {
 		homedir, err := os.UserHomeDir()
 		if err != nil {
 			return Args{}, err
@@ -415,7 +407,7 @@ func getArgs() (Args, error) {
 }
 
 func main() {
-	args, err := getArgs()
+	args, err := loadArgs()
 	if err != nil {
 		fmt.Println(err)
 		return
