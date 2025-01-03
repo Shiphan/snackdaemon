@@ -5,22 +5,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/fs"
+	"log"
 	"net"
 	"os"
 	"os/exec"
-	"os/signal"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
 const isLinux bool = runtime.GOOS == "linux"
 const isWindows bool = runtime.GOOS == "windows"
 
-const DEFAULT_SOCKET_PATH string = "/tmp/snackdaemon.sock"
+const DEFAULT_PORT uint16 = 42069
 
 var DEFAULT_LINUX_SHELL []string = []string{"bash", "-c"}
 var DEFAULT_WINDOWS_SHELL []string = []string{"powershell.exe", "-c"}
@@ -121,15 +120,6 @@ func printHelp() {
 
 	fmt.Println()
 	fmt.Println("Visit 'https://github.com/Shiphan/snackdaemon' for more information or bug report.")
-
-}
-
-func printInvalidArgs() {
-	fmt.Println("invalid arguments, try `snackdaemon help` to get help.")
-}
-
-func printInvalidConfig() {
-	fmt.Println("invalid config file")
 }
 
 const (
@@ -165,18 +155,17 @@ func recvTlv(conn net.Conn) (TlvData, error) {
 	}
 
 	return recv, nil
-
 }
 
-func client(sendTlv TlvData, socketPath string) (TlvData, error) {
+func client(sendTlv TlvData, port uint16) (TlvData, error) {
 	var recv TlvData
-	conn, err := net.Dial("unix", socketPath)
+	conn, err := net.Dial("tcp", fmt.Sprintf(":%v", port))
 	if err != nil {
 		return recv, err
 	}
 	defer conn.Close()
 
-	conn.Write([]byte(sendTlv.toBytes()))
+	conn.Write(sendTlv.toBytes())
 
 	recv, err = recvTlv(conn)
 	if err != nil {
@@ -228,339 +217,286 @@ func execute(commands []string) {
 	exec.Command(commands[0], commands[1:]...).Run()
 }
 
-func openDaemon(socketPath string, useConfig bool, configPath string) {
-	if !useConfig {
-		homedir, err := os.UserHomeDir()
-		if err != nil {
-			fmt.Println("Can not get your home directory.")
-			return
-		}
-		configPath = homedir + "/.config/snackdaemon/snackdaemon.json"
-	}
-
-	if _, err := os.Stat(socketPath); err == nil {
-		fmt.Printf("Found \"%v\", trying close it.\n", socketPath)
-
-		for i := 0; i < 5; i++ {
-			recv, err := client(TlvData{KILL, ""}, socketPath)
-			if err != nil {
-				fmt.Printf("try[%d]: error: %v\n", i, err)
-				time.Sleep(500 * time.Millisecond)
-				if _, err := os.Stat(socketPath); errors.Is(err, fs.ErrNotExist) {
-					break
-				}
-				continue
-			}
-
-			fmt.Printf("try[%d]: received: %v\n", i, recv.Value)
-
-			if _, err := os.Stat(socketPath); errors.Is(err, fs.ErrNotExist) {
-				break
-			}
-			time.Sleep(500 * time.Millisecond)
-			if _, err := os.Stat(socketPath); errors.Is(err, fs.ErrNotExist) {
-				break
-			}
-		}
-
-		if _, err := os.Stat(socketPath); err == nil {
-			fmt.Printf("Unable to close the old daemon (socket at \"%v\")\n", socketPath)
-			return
-		}
-
-		fmt.Println("----------")
-	}
-
+func openDaemon(port uint16, configPath string) error {
 	config, err := loadConfig(configPath)
 	if err != nil {
-		printInvalidConfig()
-		return
+		return fmt.Errorf("error: invalid config file (%v)", err)
 	}
 
 	printConfig(config)
 	fmt.Println("----------")
 
-	listener, err := net.Listen("unix", socketPath)
+	listener, err := net.Listen("tcp", fmt.Sprintf(":%v", port))
 	if err != nil {
-		fmt.Printf("Can not listen to \"%s\"", socketPath)
+		return fmt.Errorf("error: can not listen to port %v (%v)", port, err)
 	}
-	defer os.Remove(socketPath)
 	defer listener.Close()
-
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, syscall.SIGINT)
-	go func() {
-		<-c
-		_, err := client(TlvData{KILL, ""}, socketPath)
-		if err != nil {
-			panic("Unable to connect to daemon when received SIGINT.")
-		}
-		time.Sleep(time.Second)
-		fmt.Println("Force closing...")
-		os.Remove(socketPath)
-		os.Exit(0)
-	}()
 
 	timer := NewTimer(config.timeoutDuration, func() {}, false)
 	running := true
 	for running {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Can not accept this")
-			return
-		}
-		defer conn.Close()
-
-		tlv, err := recvTlv(conn)
-		if err != nil {
-			continue
-		}
-
-		switch tlv.Type {
-		case PING:
-			fmt.Println("ping")
-
-			conn.Write(TlvData{Type: RESPOND, Value: "pong"}.toBytes())
-		case KILL:
-			fmt.Println("kill")
-
-			running = false
-
-			conn.Write(TlvData{Type: RESPOND, Value: "ok"}.toBytes())
-		case CLOSE:
-			fmt.Println("close")
-
-			if timer.started && !timer.stopped {
-				timer.cancel()
-				execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
-			}
-
-			conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
-		case UPDATE:
-			index := slices.Index(config.Options, tlv.Value)
-			if index == -1 {
-				fmt.Printf("update: %s (no such option)\n", tlv.Value)
-				conn.Write(TlvData{Type: RESPOND, Value: "no such option"}.toBytes())
-				continue
-			}
-
-			if timer.stopped || !timer.started {
-				execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.OpenCommand))
-				exec.Command("bash", "-c", config.OpenCommand).Run()
-			}
-
-			execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), fmt.Sprintf(config.UpdateCommand, index)))
-
-			fmt.Printf("update: %s (index: %d)\n", tlv.Value, index)
-
-			timer.cancel()
-			timer = NewTimer(config.timeoutDuration, func() {
-				execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
-			}, true)
-
-			conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
-		case RELOAD:
-			newConfigPath := tlv.Value
-			if newConfigPath == "" {
-				newConfigPath = configPath
-			}
-			newConfig, err := loadConfig(newConfigPath)
+		func() {
+			conn, err := listener.Accept()
 			if err != nil {
-				fmt.Printf("reload: failed to reload with \"%v\"\n", newConfigPath)
-				conn.Write(TlvData{Type: RESPOND, Value: "failed to reload"}.toBytes())
-				continue
+				log.Printf("Can not accept this (%v)", err)
+				return
+			}
+			defer conn.Close()
+
+			tlv, err := recvTlv(conn)
+			if err != nil {
+				return
 			}
 
-			config = newConfig
-			configPath = newConfigPath
+			switch tlv.Type {
+			case PING:
+				fmt.Println("ping")
 
-			fmt.Printf("reload: reload with \"%v\"\n", newConfigPath)
-			fmt.Println("----------")
-			printConfig(config)
-			fmt.Println("----------")
+				conn.Write(TlvData{Type: RESPOND, Value: "pong"}.toBytes())
+			case KILL:
+				fmt.Println("kill")
 
-			conn.Write(TlvData{Type: RESPOND, Value: "ok"}.toBytes())
-		default:
-			fmt.Printf("Unknown message: %v\n", tlv)
-		}
+				running = false
+
+				conn.Write(TlvData{Type: RESPOND, Value: "ok"}.toBytes())
+			case CLOSE:
+				fmt.Println("close")
+
+				if timer.started && !timer.stopped {
+					timer.cancel()
+					execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
+				}
+
+				conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
+			case UPDATE:
+				index := slices.Index(config.Options, tlv.Value)
+				if index == -1 {
+					fmt.Printf("update: %s (no such option)\n", tlv.Value)
+					conn.Write(TlvData{Type: RESPOND, Value: "no such option"}.toBytes())
+					return
+				}
+
+				if timer.stopped || !timer.started {
+					execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.OpenCommand))
+				}
+
+				execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), fmt.Sprintf(config.UpdateCommand, index)))
+
+				fmt.Printf("update: %s (index: %d)\n", tlv.Value, index)
+
+				timer.cancel()
+				timer = NewTimer(config.timeoutDuration, func() {
+					execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
+				}, true)
+
+				conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
+			case RELOAD:
+				newConfigPath := tlv.Value
+				if newConfigPath == "" {
+					newConfigPath = configPath
+				}
+				newConfig, err := loadConfig(newConfigPath)
+				if err != nil {
+					log.Printf("reload: failed to reload with \"%v\"\n", newConfigPath)
+					conn.Write(TlvData{Type: RESPOND, Value: "failed to reload"}.toBytes())
+					return
+				}
+
+				config = newConfig
+				configPath = newConfigPath
+
+				fmt.Printf("reload: reload with \"%v\"\n", newConfigPath)
+				fmt.Println("----------")
+				printConfig(config)
+				fmt.Println("----------")
+
+				conn.Write(TlvData{Type: RESPOND, Value: "ok"}.toBytes())
+			default:
+				log.Printf("Unknown message: %v\n", tlv)
+			}
+		}()
 	}
+	return nil
 }
 
-type Flags struct {
-	help       bool
-	socket     bool
-	socketPath string
-	config     bool
-	configPath string
+type Args struct {
+	command      string
+	help         bool
+	port         uint16
+	configPath   string
+	updateOption string
 }
 
-func main() {
-	/*
-		tags: --help -h --socket -s --config -c
-		commands: daemon kill ping close reload update help
-	*/
-
-	flags := Flags{help: false, socket: false, config: false}
-	command := ""
-	updateOption := ""
+// tags: --help -h --port -p --config -c
+// commands: daemon kill ping close reload update help
+func getArgs() (Args, error) {
+	tmpArgs := struct {
+		command      string
+		help         bool
+		port         *uint16
+		configPath   *string
+		updateOption string
+	}{
+		command:      "",
+		help:         false,
+		port:         nil,
+		configPath:   nil,
+		updateOption: "",
+	}
 	for i := 1; i < len(os.Args); i++ {
 		switch os.Args[i] {
 		case "--help", "-h":
-			if flags.help {
-				printInvalidArgs()
-				return
+			if tmpArgs.help {
+				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			flags.help = true
-		case "--socket", "-s":
+			tmpArgs.help = true
+		case "--port", "-p":
 			i++
-			if flags.socket || i >= len(os.Args) {
-				printInvalidArgs()
-				return
+			if tmpArgs.port != nil || i >= len(os.Args) {
+				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			flags.socket = true
-			flags.socketPath = os.Args[i]
+			port, err := strconv.ParseUint(os.Args[i], 10, 16)
+			if err != nil {
+				return Args{}, err
+			}
+			tmpArgs.port = new(uint16)
+			*tmpArgs.port = uint16(port)
 		case "--config", "-c":
 			i++
-			if flags.config || i >= len(os.Args) {
-				printInvalidArgs()
-				return
+			if tmpArgs.configPath != nil || i >= len(os.Args) {
+				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			flags.config = true
-			flags.configPath = os.Args[i]
+			tmpArgs.configPath = &os.Args[i]
 		case "daemon", "kill", "ping", "reload", "close", "generate-config", "help":
-			if command != "" {
-				printInvalidArgs()
-				return
+			if tmpArgs.command != "" {
+				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			command = os.Args[i]
+			tmpArgs.command = os.Args[i]
 		case "update":
 			i++
-			if command != "" || i >= len(os.Args) {
-				printInvalidArgs()
-				return
+			if tmpArgs.command != "" || i >= len(os.Args) {
+				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			command = "update"
-			updateOption = os.Args[i]
+			tmpArgs.command = "update"
+			tmpArgs.updateOption = os.Args[i]
 		default:
-			printInvalidArgs()
-			return
+			return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 		}
 	}
 
-	switch command {
-	case "":
-		if flags.socket || flags.config {
-			printInvalidArgs()
-			return
+	if tmpArgs.command == "" {
+		return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
+	}
+	args := Args{
+		command:      tmpArgs.command,
+		help:         tmpArgs.help,
+		port:         DEFAULT_PORT,
+		updateOption: tmpArgs.updateOption,
+	}
+	if tmpArgs.port != nil {
+		args.port = *tmpArgs.port
+	}
+	if tmpArgs.configPath != nil {
+		args.configPath = *tmpArgs.configPath
+	} else {
+		homedir, err := os.UserHomeDir()
+		if err != nil {
+			return Args{}, err
 		}
-		if flags.help {
-			printHelp()
-			return
-		}
+		args.configPath = homedir + "/.config/snackdaemon/snackdaemon.json"
+	}
 
-		printInvalidArgs()
+	return args, nil
+}
+
+func main() {
+	args, err := getArgs()
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	switch args.command {
 	case "daemon":
-		if flags.help {
+		if args.help {
 			// TODO: add daemon help
 			fmt.Println("The help for daemon")
 			return
 		}
 
-		openDaemon(cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH), flags.config, flags.configPath)
-	case "kill":
-		if flags.config {
-			printInvalidArgs()
-			return
+		err := openDaemon(args.port, args.configPath)
+		if err != nil {
+			log.Fatal(err)
 		}
-		if flags.help {
+	case "kill":
+		if args.help {
 			// TODO: add kill help
 			fmt.Println("The help for kill")
 			return
 		}
 
-		recv, err := client(TlvData{KILL, ""}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{KILL, ""}, args.port)
 		if err != nil {
-			fmt.Println("Unable to connect to daemon.")
-			break
+			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "ping":
-		if flags.config {
-			printInvalidArgs()
-			return
-		}
-		if flags.help {
+		if args.help {
 			// TODO: add ping help
 			fmt.Println("The help for ping")
 			return
 		}
 
 		start := time.Now()
-		recv, err := client(TlvData{PING, ""}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{PING, ""}, args.port)
 		if err != nil {
-			fmt.Println("Unable to connect to daemon.")
-			break
+			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		end := time.Now()
 		fmt.Printf("%v (latency: %s)\n", recv.Value, end.Sub(start).String())
 	case "reload":
-		if flags.help {
+		if args.help {
 			// TODO: add reload help
 			fmt.Println("The help for reload")
 			return
 		}
 
-		recv, err := client(TlvData{RELOAD, flags.configPath}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{RELOAD, args.configPath}, args.port)
 		if err != nil {
-			fmt.Println("Unable to connect to daemon.")
-			break
+			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "close":
-		if flags.config {
-			printInvalidArgs()
-			return
-		}
-		if flags.help {
+		if args.help {
 			// TODO: add close help
 			fmt.Println("The help for close")
 			return
 		}
 
-		recv, err := client(TlvData{CLOSE, ""}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{CLOSE, ""}, args.port)
 		if err != nil {
-			fmt.Println("Unable to connect to daemon.")
-			break
+			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "update":
-		if flags.config {
-			printInvalidArgs()
-			return
-		}
-		if flags.help {
+		if args.help {
 			// TODO: add update help
 			fmt.Println("The help for update")
 			return
 		}
 
-		recv, err := client(TlvData{UPDATE, updateOption}, cond(flags.socket, flags.socketPath, DEFAULT_SOCKET_PATH))
+		recv, err := client(TlvData{UPDATE, args.updateOption}, args.port)
 		if err != nil {
-			fmt.Println("Unable to connect to daemon.")
-			break
+			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "generate-config":
-		if flags.config || flags.socket {
-			printInvalidArgs()
-			return
-		}
-		if flags.help {
+		if args.help {
 			// TODO: add generate-config help
 			fmt.Println("The help for generate-config")
 			return
@@ -572,7 +508,7 @@ func main() {
 		}
 		fmt.Println(string(b))
 	case "help":
-		if flags.help {
+		if args.help {
 			// TODO: add help help
 			fmt.Println("usage: snackdaemon help")
 			fmt.Println("Print help")
@@ -581,7 +517,6 @@ func main() {
 
 		printHelp()
 	default:
-		printInvalidArgs()
-		return
+		fmt.Println("invalid arguments, try `snackdaemon help` to get help.")
 	}
 }
