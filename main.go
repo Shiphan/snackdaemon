@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strconv"
@@ -34,13 +35,15 @@ func cond[T any](isA bool, a T, b T) T {
 type Timer struct {
 	sleepTime time.Duration
 	callback  func()
-	started   bool
 	stopped   bool
 }
 
-func (timer *Timer) start() {
-	timer.started = true
-	time.NewTimer(timer.sleepTime)
+func (timer *Timer) cancel() {
+	timer.stopped = true
+}
+
+func NewTimer(sleepTime time.Duration, callback func()) *Timer {
+	timer := Timer{sleepTime: sleepTime, callback: callback, stopped: false}
 	go func() {
 		time.Sleep(timer.sleepTime)
 		if !timer.stopped {
@@ -48,17 +51,6 @@ func (timer *Timer) start() {
 		}
 		timer.stopped = true
 	}()
-}
-
-func (timer *Timer) cancel() {
-	timer.stopped = true
-}
-
-func NewTimer(sleepTime time.Duration, callback func(), autoStart bool) *Timer {
-	timer := Timer{sleepTime: sleepTime, callback: callback, started: false, stopped: false}
-	if autoStart {
-		timer.start()
-	}
 	return &timer
 }
 
@@ -69,7 +61,7 @@ type TlvData struct {
 
 func (tlv TlvData) toBytes() []byte {
 	valueInByte := []byte(tlv.Value)
-	var length uint64 = uint64(len(valueInByte))
+	length := uint64(len(valueInByte))
 
 	buffer := make([]byte, 10, 11+length)
 
@@ -105,31 +97,14 @@ func decodeToTlvData(bytes []byte) (TlvData, error) {
 	return tlv, nil
 }
 
-func printHelp() {
-	// TODO: update with new flags
-	fmt.Println("usage: snackdaemon <command> [<args>]")
-	fmt.Println("commands:")
-
-	fmt.Printf("    %-16sPrint help\n", "help")
-	fmt.Printf("    %-16sStart the daemon\n", "daemon")
-	fmt.Printf("    %-16sreload the config\n", "reload")
-	fmt.Printf("    %-16sSend \"kill\" to the daemon\n", "kill")
-	fmt.Printf("    %-16sPing the daemon to check connectivity\n", "ping")
-	fmt.Printf("    %-16sUpdate with <arg>'s index in \"options\" in config file\n", "update <arg>")
-	fmt.Printf("    %-16sTrigger the \"closeCommand\" in config file and end timer\n", "close")
-
-	fmt.Println()
-	fmt.Println("Visit 'https://github.com/Shiphan/snackdaemon' for more information or bug report.")
-}
-
 const (
-	ERROR   = 0
-	RESPOND = 1
-	PING    = 2
-	UPDATE  = 3
-	CLOSE   = 4
-	RELOAD  = 5
-	KILL    = 6
+	ERROR   uint16 = 0
+	RESPOND uint16 = 1
+	PING    uint16 = 2
+	UPDATE  uint16 = 3
+	CLOSE   uint16 = 4
+	RELOAD  uint16 = 5
+	KILL    uint16 = 6
 )
 
 func recvTlv(conn net.Conn) (TlvData, error) {
@@ -204,13 +179,15 @@ func loadConfig(configPath string) (Config, error) {
 	return config, nil
 }
 
-func printConfig(config Config) {
-	fmt.Println("config:")
-	fmt.Printf("timeout: %v\n", config.timeoutDuration.String())
-	fmt.Printf("open command: %v\n", config.OpenCommand)
-	fmt.Printf("update command: %v\n", config.UpdateCommand)
-	fmt.Printf("close command: %v\n", config.CloseCommand)
-	fmt.Printf("options: %v\n", config.Options)
+func (config Config) String() string {
+	return strings.Join([]string{
+		"config:",
+		fmt.Sprintf("timeout: %v", config.timeoutDuration.String()),
+		fmt.Sprintf("open command: %v", config.OpenCommand),
+		fmt.Sprintf("update command: %v", config.UpdateCommand),
+		fmt.Sprintf("close command: %v", config.CloseCommand),
+		fmt.Sprintf("options: %v", config.Options),
+	}, "\n")
 }
 
 func execute(commands []string) {
@@ -218,12 +195,19 @@ func execute(commands []string) {
 }
 
 func openDaemon(port uint16, configPath string) error {
+	if configPath == "" {
+		homedir, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		configPath = homedir + "/.config/snackdaemon/snackdaemon.json"
+	}
 	config, err := loadConfig(configPath)
 	if err != nil {
 		return fmt.Errorf("error: invalid config file (%v)", err)
 	}
 
-	printConfig(config)
+	fmt.Printf("%+v\n", config)
 	fmt.Println("----------")
 
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%v", port))
@@ -232,91 +216,87 @@ func openDaemon(port uint16, configPath string) error {
 	}
 	defer listener.Close()
 
-	timer := NewTimer(config.timeoutDuration, func() {}, false)
-	running := true
-	for running {
-		func() {
-			conn, err := listener.Accept()
-			if err != nil {
-				log.Printf("Can not accept this (%v)", err)
-				return
-			}
-			defer conn.Close()
-
-			tlv, err := recvTlv(conn)
-			if err != nil {
-				return
-			}
-
-			switch tlv.Type {
-			case PING:
-				fmt.Println("ping")
-
-				conn.Write(TlvData{Type: RESPOND, Value: "pong"}.toBytes())
-			case KILL:
-				fmt.Println("kill")
-
-				running = false
-
-				conn.Write(TlvData{Type: RESPOND, Value: "ok"}.toBytes())
-			case CLOSE:
-				fmt.Println("close")
-
-				if timer.started && !timer.stopped {
-					timer.cancel()
-					execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
-				}
-
-				conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
-			case UPDATE:
-				index := slices.Index(config.Options, tlv.Value)
-				if index == -1 {
-					fmt.Printf("update: %s (no such option)\n", tlv.Value)
-					conn.Write(TlvData{Type: RESPOND, Value: "no such option"}.toBytes())
-					return
-				}
-
-				if timer.stopped || !timer.started {
-					execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.OpenCommand))
-				}
-
-				execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), fmt.Sprintf(config.UpdateCommand, index)))
-
-				fmt.Printf("update: %s (index: %d)\n", tlv.Value, index)
-
-				timer.cancel()
-				timer = NewTimer(config.timeoutDuration, func() {
-					execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
-				}, true)
-
-				conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
-			case RELOAD:
-				newConfigPath := tlv.Value
-				if newConfigPath == "" {
-					newConfigPath = configPath
-				}
-				newConfig, err := loadConfig(newConfigPath)
-				if err != nil {
-					log.Printf("reload: failed to reload with \"%v\"\n", newConfigPath)
-					conn.Write(TlvData{Type: RESPOND, Value: "failed to reload"}.toBytes())
-					return
-				}
-
-				config = newConfig
-				configPath = newConfigPath
-
-				fmt.Printf("reload: reload with \"%v\"\n", newConfigPath)
-				fmt.Println("----------")
-				printConfig(config)
-				fmt.Println("----------")
-
-				conn.Write(TlvData{Type: RESPOND, Value: "ok"}.toBytes())
-			default:
-				log.Printf("Unknown message: %v\n", tlv)
-			}
-		}()
+	timer := NewTimer(0, func() {})
+	for {
+		shouldContinue, message, err := handleConnection(listener, timer, &config, &configPath)
+		if err != nil {
+			log.Println(err)
+			continue
+		}
+		fmt.Println(message)
+		if !shouldContinue {
+			break
+		}
 	}
 	return nil
+}
+
+func handleConnection(listener net.Listener, timer *Timer, config *Config, configPath *string) (bool, string, error) {
+	conn, err := listener.Accept()
+	if err != nil {
+		return false, "", fmt.Errorf("Can not accept this (%v)", err)
+	}
+	defer conn.Close()
+
+	tlv, err := recvTlv(conn)
+	if err != nil {
+		return false, "", err
+	}
+
+	switch tlv.Type {
+	case PING:
+		conn.Write(TlvData{Type: RESPOND, Value: "pong"}.toBytes())
+		return true, "ping", nil
+	case KILL:
+		conn.Write(TlvData{Type: RESPOND, Value: "ok"}.toBytes())
+		return false, "kill", nil
+	case CLOSE:
+		if !timer.stopped {
+			timer.cancel()
+			execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
+		}
+
+		conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
+		return true, "close", nil
+	case UPDATE:
+		index := slices.Index(config.Options, tlv.Value)
+		if index == -1 {
+			conn.Write(TlvData{Type: RESPOND, Value: "no such option"}.toBytes())
+			return true, fmt.Sprintf("update: %s (no such option)\n", tlv.Value), nil
+		}
+		if timer.stopped {
+			execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.OpenCommand))
+		}
+		execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), fmt.Sprintf(config.UpdateCommand, index)))
+		timer.cancel()
+		timer = NewTimer(config.timeoutDuration, func() {
+			execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
+		})
+
+		conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
+		return true, fmt.Sprintf("update: %s (index: %d)\n", tlv.Value, index), nil
+	case RELOAD:
+		newConfigPath := tlv.Value
+		if newConfigPath == "" {
+			newConfigPath = *configPath
+		}
+		newConfig, err := loadConfig(newConfigPath)
+		if err != nil {
+			conn.Write(TlvData{Type: RESPOND, Value: "failed to reload"}.toBytes())
+			return false, "", fmt.Errorf("reload: failed to reload with \"%v\"\n", newConfigPath)
+		}
+		*config = newConfig
+		*configPath = newConfigPath
+
+		conn.Write(TlvData{Type: RESPOND, Value: "ok"}.toBytes())
+		return true, strings.Join([]string{
+			fmt.Sprintf("reload: reload with `%v`", newConfigPath),
+			"----------",
+			fmt.Sprintf("config: %+v", config),
+			"----------",
+		}, "\n"), nil
+	}
+	return false, "", fmt.Errorf("Unknown message: %v\n", tlv)
 }
 
 type Args struct {
@@ -330,7 +310,11 @@ type Args struct {
 // tags: --help -h --port -p --config -c
 // commands: daemon kill ping close reload update help
 func loadArgs() (Args, error) {
-	args := Args{}
+	args := Args{
+		help:       false,
+		port:       DEFAULT_PORT,
+		configPath: "",
+	}
 	argsSetted := struct {
 		command    bool
 		port       bool
@@ -392,18 +376,53 @@ func loadArgs() (Args, error) {
 	if !argsSetted.command {
 		return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 	}
-	if !argsSetted.port {
-		args.port = DEFAULT_PORT
-	}
-	if !argsSetted.configPath {
-		homedir, err := os.UserHomeDir()
-		if err != nil {
-			return Args{}, err
-		}
-		args.configPath = homedir + "/.config/snackdaemon/snackdaemon.json"
-	}
 
 	return args, nil
+}
+
+func help(command string) string {
+	// TODO: update with new flags
+	switch command {
+	case "daemon":
+		// TODO: add daemon help
+		return "The help for daemon"
+	case "kill":
+		// TODO: add kill help
+		return "The help for kill"
+	case "ping":
+		// TODO: add ping help
+		return "The help for ping"
+	case "reload":
+		// TODO: add reload help
+		return "The help for reload"
+	case "close":
+		// TODO: add close help
+		return "The help for close"
+	case "update":
+		// TODO: add update help
+		return "The help for update"
+	case "generate-config":
+		// TODO: add generate-config help
+		return "The help for generate-config"
+	case "help":
+		return strings.Join([]string{
+			"usage: snackdaemon <command> [<args>]",
+			"commands:",
+			"    help            Print help",
+			"    daemon          Start the daemon",
+			"    reload          reload the config",
+			"    kill            Send \"kill\" to the daemon",
+			"    ping            Ping the daemon to check connectivity",
+			"    update <arg>    Update with <arg>'s index in \"options\" in config file",
+			"    close           Trigger the \"closeCommand\" in config file and end timer",
+			"",
+			"Visit 'https://github.com/Shiphan/snackdaemon' for more information or bug report.",
+			"usage: snackdaemon help",
+			"Print help",
+		}, "\n")
+	default:
+		return "invalid arguments, try `snackdaemon help` to get help."
+	}
 }
 
 func main() {
@@ -413,37 +432,24 @@ func main() {
 		return
 	}
 
+	if args.help {
+		fmt.Println(help(args.command))
+		return
+	}
+
 	switch args.command {
 	case "daemon":
-		if args.help {
-			// TODO: add daemon help
-			fmt.Println("The help for daemon")
-			return
-		}
-
 		err := openDaemon(args.port, args.configPath)
 		if err != nil {
 			log.Fatal(err)
 		}
 	case "kill":
-		if args.help {
-			// TODO: add kill help
-			fmt.Println("The help for kill")
-			return
-		}
-
 		recv, err := client(TlvData{KILL, ""}, args.port)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "ping":
-		if args.help {
-			// TODO: add ping help
-			fmt.Println("The help for ping")
-			return
-		}
-
 		start := time.Now()
 		recv, err := client(TlvData{PING, ""}, args.port)
 		if err != nil {
@@ -452,63 +458,36 @@ func main() {
 		end := time.Now()
 		fmt.Printf("%v (latency: %s)\n", recv.Value, end.Sub(start).String())
 	case "reload":
-		if args.help {
-			// TODO: add reload help
-			fmt.Println("The help for reload")
-			return
+		absConfigPath, err := filepath.Abs(args.configPath)
+		if err != nil {
+			log.Fatal(err)
 		}
-
-		recv, err := client(TlvData{RELOAD, args.configPath}, args.port)
+		recv, err := client(TlvData{RELOAD, absConfigPath}, args.port)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "close":
-		if args.help {
-			// TODO: add close help
-			fmt.Println("The help for close")
-			return
-		}
-
 		recv, err := client(TlvData{CLOSE, ""}, args.port)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "update":
-		if args.help {
-			// TODO: add update help
-			fmt.Println("The help for update")
-			return
-		}
-
 		recv, err := client(TlvData{UPDATE, args.updateOption}, args.port)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "generate-config":
-		if args.help {
-			// TODO: add generate-config help
-			fmt.Println("The help for generate-config")
-			return
-		}
-
 		b, err := json.MarshalIndent(Config{Timeout: "2s", OpenCommand: "eww open snackbar", UpdateCommand: "eww update snackbarIndex=%d", CloseCommand: "eww close snackbar", Options: []string{"volume", "player", "screenbrightness", "powerprofiles"}}, "", "\t")
 		if err != nil {
 			fmt.Println(err)
 		}
 		fmt.Println(string(b))
 	case "help":
-		if args.help {
-			// TODO: add help help
-			fmt.Println("usage: snackdaemon help")
-			fmt.Println("Print help")
-			return
-		}
-
-		printHelp()
+		fmt.Println(help("help"))
 	default:
-		fmt.Println("invalid arguments, try `snackdaemon help` to get help.")
+		fmt.Println(help(""))
 	}
 }
