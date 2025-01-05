@@ -196,11 +196,11 @@ func execute(commands []string) {
 
 func openDaemon(port uint16, configPath string) error {
 	if configPath == "" {
-		homedir, err := os.UserHomeDir()
+		configDir, err := os.UserConfigDir()
 		if err != nil {
 			return err
 		}
-		configPath = homedir + "/.config/snackdaemon/snackdaemon.json"
+		configPath = configDir + "/snackdaemon/snackdaemon.json"
 	}
 	config, err := loadConfig(configPath)
 	if err != nil {
