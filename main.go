@@ -12,12 +12,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 )
 
-const DEFAULT_PORT uint16 = 42069
+const DEFAULT_SOCKET_ADDRESS string = "\x00snackdaemon"
+
+// var DEFAULT_SOCKET_ADDRESS string = fmt.Sprintf("/run/user/%d/snackdaemon/snackdaemon.sock", os.Getuid())
 
 var DEFAULT_LINUX_SHELL []string = []string{"bash", "-c"}
 var DEFAULT_WINDOWS_SHELL []string = []string{"powershell.exe", "-c"}
@@ -129,9 +130,9 @@ func recvTlv(conn net.Conn) (TlvData, error) {
 	return recv, nil
 }
 
-func client(sendTlv TlvData, port uint16) (TlvData, error) {
+func client(sendTlv TlvData, socketAddress string) (TlvData, error) {
 	var recv TlvData
-	conn, err := net.Dial("tcp", fmt.Sprintf(":%v", port))
+	conn, err := net.DialUnix("unix", nil, &net.UnixAddr{Name: socketAddress, Net: "unix"})
 	if err != nil {
 		return recv, err
 	}
@@ -191,7 +192,7 @@ func execute(commands []string) {
 	exec.Command(commands[0], commands[1:]...).Run()
 }
 
-func openDaemon(port uint16, configPath string) error {
+func openDaemon(socketAddress string, configPath string) error {
 	if configPath == "" {
 		configDir, err := os.UserConfigDir()
 		if err != nil {
@@ -207,9 +208,9 @@ func openDaemon(port uint16, configPath string) error {
 	fmt.Printf("%+v\n", config)
 	fmt.Println("----------")
 
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%v", port))
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socketAddress, Net: "unix"})
 	if err != nil {
-		return fmt.Errorf("error: can not listen to port %v (%v)", port, err)
+		return fmt.Errorf("error: can not listen to address `%v` (%v)", socketAddress, err)
 	}
 	defer listener.Close()
 
@@ -297,29 +298,29 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 }
 
 type Args struct {
-	command      string
-	help         bool
-	port         uint16
-	configPath   string
-	updateOption string
+	command       string
+	help          bool
+	socketAddress string
+	configPath    string
+	updateOption  string
 }
 
-// tags: --help -h --port -p --config -c
+// tags: --help -h --socket -s --config -c
 // commands: daemon kill ping close reload update help
 func loadArgs() (Args, error) {
 	args := Args{
-		help:       false,
-		port:       DEFAULT_PORT,
-		configPath: "",
+		help:          false,
+		socketAddress: DEFAULT_SOCKET_ADDRESS,
+		configPath:    "",
 	}
 	argsSetted := struct {
-		command    bool
-		port       bool
-		configPath bool
+		command       bool
+		socketAddress bool
+		configPath    bool
 	}{
-		command:    false,
-		port:       false,
-		configPath: false,
+		command:       false,
+		socketAddress: false,
+		configPath:    false,
 	}
 	for i := 1; i < len(os.Args); i++ {
 		switch os.Args[i] {
@@ -329,18 +330,14 @@ func loadArgs() (Args, error) {
 			}
 
 			args.help = true
-		case "--port", "-p":
+		case "--socket", "-s":
 			i++
-			if argsSetted.port || i >= len(os.Args) {
+			if argsSetted.socketAddress || i >= len(os.Args) {
 				return Args{}, fmt.Errorf("invalid arguments, try `snackdaemon help` to get help.")
 			}
 
-			port, err := strconv.ParseUint(os.Args[i], 10, 16)
-			if err != nil {
-				return Args{}, err
-			}
-			argsSetted.port = true
-			args.port = uint16(port)
+			argsSetted.socketAddress = true
+			args.socketAddress = os.Args[i]
 		case "--config", "-c":
 			i++
 			if argsSetted.configPath || i >= len(os.Args) {
@@ -436,19 +433,19 @@ func main() {
 
 	switch args.command {
 	case "daemon":
-		err := openDaemon(args.port, args.configPath)
+		err := openDaemon(args.socketAddress, args.configPath)
 		if err != nil {
 			log.Fatal(err)
 		}
 	case "kill":
-		recv, err := client(TlvData{KILL, ""}, args.port)
+		recv, err := client(TlvData{KILL, ""}, args.socketAddress)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "ping":
 		start := time.Now()
-		recv, err := client(TlvData{PING, ""}, args.port)
+		recv, err := client(TlvData{PING, ""}, args.socketAddress)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
@@ -459,19 +456,19 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		recv, err := client(TlvData{RELOAD, absConfigPath}, args.port)
+		recv, err := client(TlvData{RELOAD, absConfigPath}, args.socketAddress)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "close":
-		recv, err := client(TlvData{CLOSE, ""}, args.port)
+		recv, err := client(TlvData{CLOSE, ""}, args.socketAddress)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
 		fmt.Println(recv.Value)
 	case "update":
-		recv, err := client(TlvData{UPDATE, args.updateOption}, args.port)
+		recv, err := client(TlvData{UPDATE, args.updateOption}, args.socketAddress)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
