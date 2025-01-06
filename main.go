@@ -17,20 +17,17 @@ import (
 	"time"
 )
 
-const isLinux bool = runtime.GOOS == "linux"
-const isWindows bool = runtime.GOOS == "windows"
-
 const DEFAULT_PORT uint16 = 42069
 
 var DEFAULT_LINUX_SHELL []string = []string{"bash", "-c"}
 var DEFAULT_WINDOWS_SHELL []string = []string{"powershell.exe", "-c"}
 
-func cond[T any](isA bool, a T, b T) T {
-	if isA {
-		return a
+var DEFAULT_SHELL []string = func() []string {
+	if runtime.GOOS == "windows" {
+		return DEFAULT_WINDOWS_SHELL
 	}
-	return b
-}
+	return DEFAULT_LINUX_SHELL
+}()
 
 type Timer struct {
 	sleepTime time.Duration
@@ -253,7 +250,7 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 	case CLOSE:
 		if !timer.stopped {
 			timer.cancel()
-			execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
+			execute(append(DEFAULT_SHELL, config.CloseCommand))
 		}
 
 		conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
@@ -265,12 +262,12 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 			return true, fmt.Sprintf("update: %s (no such option)\n", tlv.Value), nil
 		}
 		if timer.stopped {
-			execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.OpenCommand))
+			execute(append(DEFAULT_SHELL, config.OpenCommand))
 		}
-		execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), fmt.Sprintf(config.UpdateCommand, index)))
+		execute(append(DEFAULT_SHELL, fmt.Sprintf(config.UpdateCommand, index)))
 		timer.cancel()
 		timer = NewTimer(config.timeoutDuration, func() {
-			execute(append(cond(isWindows, DEFAULT_WINDOWS_SHELL, DEFAULT_LINUX_SHELL), config.CloseCommand))
+			execute(append(DEFAULT_SHELL, config.CloseCommand))
 		})
 
 		conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
