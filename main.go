@@ -337,7 +337,12 @@ func loadArgs() (Args, error) {
 			}
 
 			argsSetted.socketAddress = true
-			args.socketAddress = os.Args[i]
+			if os.Args[i] == "@" && i+1 < len(os.Args) {
+				i++
+				args.socketAddress = "\x00" + os.Args[i]
+			} else {
+				args.socketAddress = os.Args[i]
+			}
 		case "--config", "-c":
 			i++
 			if argsSetted.configPath || i >= len(os.Args) {
