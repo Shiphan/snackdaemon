@@ -27,8 +27,12 @@ type Timer struct {
 	stopped   bool
 }
 
-func (timer *Timer) cancel() {
+func (timer *Timer) Cancel() {
 	timer.stopped = true
+}
+
+func (timer *Timer) Stopped() bool {
+	return timer.stopped
 }
 
 func NewTimer(sleepTime time.Duration, callback func()) *Timer {
@@ -242,8 +246,8 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 		conn.Write(TlvData{Type: RESPOND, Value: "ok"}.toBytes())
 		return false, "kill", nil
 	case CLOSE:
-		if !timer.stopped {
-			timer.cancel()
+		if !timer.Stopped() {
+			timer.Cancel()
 			execute(append(slices.Clone(config.Shell), config.CloseCommand))
 		}
 
@@ -255,11 +259,11 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 			conn.Write(TlvData{Type: RESPOND, Value: "no such option"}.toBytes())
 			return true, fmt.Sprintf("update: %s (no such option)", tlv.Value), nil
 		}
-		if timer.stopped {
+		if timer.Stopped() {
 			execute(append(slices.Clone(config.Shell), config.OpenCommand))
 		}
 		execute(append(slices.Clone(config.Shell), fmt.Sprintf(config.UpdateCommand, index)))
-		timer.cancel()
+		timer.Cancel()
 		timer = NewTimer(config.timeoutDuration, func() {
 			execute(append(slices.Clone(config.Shell), config.CloseCommand))
 		})
