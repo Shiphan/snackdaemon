@@ -149,6 +149,7 @@ func client(sendTlv TlvData, socketAddress string) (TlvData, error) {
 }
 
 type Config struct {
+	Shell           []string `json:"shell"`
 	timeoutDuration time.Duration
 	Timeout         string   `json:"timeout"`
 	OpenCommand     string   `json:"openCommand"`
@@ -158,7 +159,7 @@ type Config struct {
 }
 
 func loadConfig(configPath string) (Config, error) {
-	var config Config
+	config := Config{Shell: slices.Clone(DEFAULT_SHELL)}
 
 	configFile, err := os.ReadFile(configPath)
 	if err != nil {
@@ -180,6 +181,7 @@ func loadConfig(configPath string) (Config, error) {
 func (config Config) String() string {
 	return strings.Join([]string{
 		"config:",
+		fmt.Sprintf("shell: %v", config.Shell),
 		fmt.Sprintf("timeout: %v", config.timeoutDuration.String()),
 		fmt.Sprintf("open command: %v", config.OpenCommand),
 		fmt.Sprintf("update command: %v", config.UpdateCommand),
@@ -251,7 +253,7 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 	case CLOSE:
 		if !timer.stopped {
 			timer.cancel()
-			execute(append(DEFAULT_SHELL, config.CloseCommand))
+			execute(append(slices.Clone(config.Shell), config.CloseCommand))
 		}
 
 		conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
@@ -263,12 +265,12 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 			return true, fmt.Sprintf("update: %s (no such option)\n", tlv.Value), nil
 		}
 		if timer.stopped {
-			execute(append(DEFAULT_SHELL, config.OpenCommand))
+			execute(append(slices.Clone(config.Shell), config.OpenCommand))
 		}
-		execute(append(DEFAULT_SHELL, fmt.Sprintf(config.UpdateCommand, index)))
+		execute(append(slices.Clone(config.Shell), fmt.Sprintf(config.UpdateCommand, index)))
 		timer.cancel()
 		timer = NewTimer(config.timeoutDuration, func() {
-			execute(append(DEFAULT_SHELL, config.CloseCommand))
+			execute(append(slices.Clone(config.Shell), config.CloseCommand))
 		})
 
 		conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())

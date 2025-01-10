@@ -1,4 +1,5 @@
 {
+	"shell": [ "bash", "-c" ],
 	"timeout": "2s",
 	"openCommand": "eww open snackbar",
 	"updateCommand": "eww update snackbarIndex=%d",
