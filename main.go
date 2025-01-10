@@ -10,7 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -20,15 +19,7 @@ const DEFAULT_SOCKET_ADDRESS string = "\x00snackdaemon"
 
 // var DEFAULT_SOCKET_ADDRESS string = fmt.Sprintf("/run/user/%d/snackdaemon/snackdaemon.sock", os.Getuid())
 
-var DEFAULT_LINUX_SHELL []string = []string{"bash", "-c"}
-var DEFAULT_WINDOWS_SHELL []string = []string{"powershell.exe", "-c"}
-
-var DEFAULT_SHELL []string = func() []string {
-	if runtime.GOOS == "windows" {
-		return DEFAULT_WINDOWS_SHELL
-	}
-	return DEFAULT_LINUX_SHELL
-}()
+var DEFAULT_SHELL []string = []string{"bash", "-c"}
 
 type Timer struct {
 	sleepTime time.Duration
