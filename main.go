@@ -253,7 +253,7 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 		index := slices.Index(config.Options, tlv.Value)
 		if index == -1 {
 			conn.Write(TlvData{Type: RESPOND, Value: "no such option"}.toBytes())
-			return true, fmt.Sprintf("update: %s (no such option)\n", tlv.Value), nil
+			return true, fmt.Sprintf("update: %s (no such option)", tlv.Value), nil
 		}
 		if timer.stopped {
 			execute(append(slices.Clone(config.Shell), config.OpenCommand))
@@ -265,7 +265,7 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 		})
 
 		conn.Write(TlvData{Type: RESPOND, Value: ""}.toBytes())
-		return true, fmt.Sprintf("update: %s (index: %d)\n", tlv.Value, index), nil
+		return true, fmt.Sprintf("update: %s (index: %d)", tlv.Value, index), nil
 	case RELOAD:
 		newConfigPath := tlv.Value
 		if newConfigPath == "" {
@@ -274,7 +274,7 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 		newConfig, err := loadConfig(newConfigPath)
 		if err != nil {
 			conn.Write(TlvData{Type: RESPOND, Value: "failed to reload"}.toBytes())
-			return false, "", fmt.Errorf("reload: failed to reload with \"%v\"\n", newConfigPath)
+			return false, "", fmt.Errorf("reload: failed to reload with \"%v\"", newConfigPath)
 		}
 		*config = newConfig
 		*configPath = newConfigPath
@@ -287,7 +287,7 @@ func handleConnection(listener net.Listener, timer *Timer, config *Config, confi
 			"----------",
 		}, "\n"), nil
 	}
-	return false, "", fmt.Errorf("Unknown message: %v\n", tlv)
+	return false, "", fmt.Errorf("Unknown message: %v", tlv)
 }
 
 type Args struct {
