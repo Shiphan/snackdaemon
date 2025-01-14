@@ -52,6 +52,17 @@ type TlvData struct {
 	Value string
 }
 
+// types
+const (
+	ERROR   uint16 = 0
+	RESPOND uint16 = 1
+	PING    uint16 = 2
+	UPDATE  uint16 = 3
+	CLOSE   uint16 = 4
+	RELOAD  uint16 = 5
+	KILL    uint16 = 6
+)
+
 func (tlv TlvData) toBytes() []byte {
 	valueInByte := []byte(tlv.Value)
 	length := uint64(len(valueInByte))
@@ -89,16 +100,6 @@ func decodeToTlvData(bytes []byte) (TlvData, error) {
 
 	return tlv, nil
 }
-
-const (
-	ERROR   uint16 = 0
-	RESPOND uint16 = 1
-	PING    uint16 = 2
-	UPDATE  uint16 = 3
-	CLOSE   uint16 = 4
-	RELOAD  uint16 = 5
-	KILL    uint16 = 6
-)
 
 func recvTlv(conn net.Conn) (TlvData, error) {
 	var recv TlvData
