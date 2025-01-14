@@ -473,11 +473,15 @@ func main() {
 		end := time.Now()
 		fmt.Printf("%v (latency: %s)\n", recv.Value, end.Sub(start).String())
 	case "reload":
-		absConfigPath, err := filepath.Abs(args.configPath)
-		if err != nil {
-			log.Fatal(err)
+		configPath := args.configPath
+		if configPath != "" {
+			var err error
+			configPath, err = filepath.Abs(args.configPath)
+			if err != nil {
+				log.Fatal(err)
+			}
 		}
-		recv, err := client(TlvData{RELOAD, absConfigPath}, args.socketAddress)
+		recv, err := client(TlvData{RELOAD, configPath}, args.socketAddress)
 		if err != nil {
 			log.Fatalf("Unable to connect to daemon. (%v)", err)
 		}
