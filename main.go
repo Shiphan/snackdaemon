@@ -418,19 +418,22 @@ func help(command string) string {
 		return "The help for generate-config"
 	case "help":
 		return strings.Join([]string{
-			"usage: snackdaemon <command> [<args>]",
+			"usage: snackdaemon [<options>] <command> [<args>]",
 			"commands:",
-			"    help            Print help",
+			"    help            Print this help message",
 			"    daemon          Start the daemon",
-			"    reload          reload the config",
-			"    kill            Send \"kill\" to the daemon",
+			"    reload          Reload the config",
+			"    kill            Send `kill` to the daemon",
 			"    ping            Ping the daemon to check connectivity",
-			"    update <arg>    Update with <arg>'s index in \"options\" in config file",
-			"    close           Trigger the \"closeCommand\" in config file and end timer",
+			"    update <arg>    Update with <arg>'s index in `options` in config file",
+			"    close           Trigger the `closeCommand` in config file and end timer",
+			"options:",
+			"    -c",
+			"    --config <arg>      Use the file at <arg> as the config file, effect on command `daemon` and `reload`",
+			"    -s",
+			"    --socket [@] <arg>  Use the <arg> as the socket, if @ is setted than it is a abstract socket",
 			"",
 			"Visit 'https://github.com/Shiphan/snackdaemon' for more information or bug report.",
-			"usage: snackdaemon help",
-			"Print help",
 		}, "\n")
 	default:
 		return "invalid arguments, try `snackdaemon help` to get help."
